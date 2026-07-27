@@ -56,12 +56,31 @@ node cli.js upgrade
 
 Add `--pretty` to any command for indented JSON. Add `--no-remote` to skip remote config and version checks (offline).
 
+## Wallet addresses / 钱包地址
+
+The skill is stateless — it does NOT store or remember any address. A wallet
+address is just a positional argument passed per call, validated as
+`0x` + 40 hex (invalid → `{"error":...}` on stderr, exit 2).
+
+Remembering *which* address(es) to track is the calling agent's job:
+
+- Ask the user for their Pharos address once ("帮我盯着 0x… / track 0x… for me")
+  and persist it in the agent's own memory/store, keyed to the user.
+- On each scheduled run (or follow-up question), read the stored address and
+  pass it to the CLI. Support multiple addresses per user by looping the
+  command over each.
+- 地址由 agent 记忆并按用户存储；skill 每次只接收一个地址参数，不做持久化。
+
+If the user has not provided an address yet, ask for it before running
+`position` / `reminders` / `advise`. (`vaults` needs no address.)
+
 ## Proactive / scheduled use / 定期主动使用
 
 This skill is read-only and does NOT schedule itself. The calling agent
 (openclaw / hermes / cron) is responsible for running it on a schedule and
 delivering results to the user (e.g. via Telegram). The skill only returns
-JSON; the agent decides cadence and delivery channel.
+JSON; the agent decides cadence and delivery channel. Addresses come from
+the agent's stored memory (see "Wallet addresses" above).
 
 Recommended daily job, per tracked user address:
 
