@@ -190,12 +190,12 @@ body 用 bash few-shot 示例驱动（LLM 在范例上比纯 schema 更准）：
 
 | env | 默认 | 说明 |
 |---|---|---|
-| `PHAROS_RPC_URL` | 公共 Pharos 主网 RPC | 覆盖 RPC 节点；**不硬编码含 key 的第三方节点** |
+| `PHAROS_RPC_URL` | `https://rpc.pharos.xyz`（chainId 1672，已实测可用） | 覆盖 RPC 节点；**不硬编码含 key 的第三方节点** |
 | `PHAROS_RWA_CACHE_DIR` | `~/.cache/pharos-rwa` | 缓存目录 |
 | `PHAROS_RWA_CONFIG_URL` | 上述 raw 地址 | 覆盖远程配置源（开发用） |
 | `PHAROS_RWA_NO_REMOTE` | 未设 | 等价 `--no-remote` |
 
-RPC 默认值需在实现时确认一个可用的公共 Pharos 主网 RPC（chainId 需与 URL 匹配，否则 ethers6 首次请求抛 "network changed"）。
+默认 RPC `https://rpc.pharos.xyz` 已实测：chainId `0x688`=1672，`eth_blockNumber` 正常，APC3M `totalAssets()` 返回值与 harbor TVL 吻合。ethers6 构造 provider 时需显式传 chainId 1672（URL 与 chainId 必须匹配，否则首次请求抛 "network changed"）。
 
 ### D10 — 类型与精度
 
