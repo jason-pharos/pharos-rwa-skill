@@ -235,6 +235,17 @@ RPC 默认值需在实现时确认一个可用的公共 Pharos 主网 RPC（chai
 
 失败隔离：某金库链上读取失败 → 该项 `{ vault, error }` 进 `errors`，其余正常返回，`ok` 仍可为 true（部分成功）。
 
+### D12 — 复用的开源工具（调研结论）
+
+在写代码前调研了自更新 / CLI / skill 脚手架的现成方案，结论：
+
+- **Skill 脚手架 → 复用 Anthropic 官方 `skill-creator`（本地已安装）**。用它交互式生成 SKILL.md + frontmatter、`quick_validate.py` 校验结构、`improve_description.py` 优化触发词、eval harness 用 subagent 测触发命中率。均为 dev-time Python 工具，**不进运行时 bundle**。配合 superpowers `writing-skills` 最佳实践。注意其默认布局（references/scripts/assets/evals）偏文档型 skill，我们是代码型（src/ + cli.js），**布局仍按 D2，仅借用它写/校验/eval SKILL.md**。
+- **CLI 框架 → `commander`**（标准、可干净 tree-shake 进 bundle）。
+- **自更新（v1 JS）→ 手写（不复用库）**。`update-notifier` / `tiny-updater` / `simple-update-notifier` 均基于 **npm registry**，与我们的 GitHub Releases + raw config 模型不符；且 `update-notifier` 用动态 import + 子进程，**无法被 esbuild 打包**。调研未发现广泛采用、活跃维护的 Node 库专做"从 GitHub Release 资产自更新"。故维持 D8 的 ~50 行手写方案。
+- **自更新（v2 Go）→ 复用 `go-github-selfupdate`（或活跃 fork `creativeprojects/go-selfupdate`）**。原生实现"检测最新 release → 按 OS/arch 下载二进制 → 自替换 → 回滚 → hash/签名校验"，正是本项目模式。v2 迁 Go 时直接采用，省掉自更新实现。
+
+参考：anthropics/skills（skill-creator）、Agent Skills 官方文档、tiny-updater / simple-update-notifier / cli-autoupdater、rhysd/go-github-selfupdate。
+
 ## Risks / Trade-offs
 
 - **[APC3M action period 每期需手动更新]** → 靠远程 `config/vaults.json`，在 GitHub 改一次即全用户生效；文档写明每期流程。仍是人工触发，遗忘会导致日期过期 → 输出对已过期窗口标注 `stale` 提示。
