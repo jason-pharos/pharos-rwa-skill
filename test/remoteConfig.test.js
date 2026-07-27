@@ -47,3 +47,18 @@ test('identity/address fields protected from remote override', () => {
   // Only policy/value fields can be overridden
   assert.equal(apc.apyFallback, 0.5);
 });
+
+test('registry balanceSources: pALPHA spans Pharos+Ethereum, APC3M single Pharos', () => {
+  const apc = DEFAULT_REGISTRY.find((v) => v.id === 'APC3M');
+  const pa = DEFAULT_REGISTRY.find((v) => v.id === 'pALPHA');
+  // APC3M: single Pharos source
+  assert.equal(apc.balanceSources.length, 1);
+  assert.equal(apc.balanceSources[0].chainId, 1672);
+  assert.equal(apc.balanceSources[0].token, '0xEC47E6f3EF1E7bc8e00F670aC3d5016798Fe44d0');
+  // pALPHA: Pharos + Ethereum, distinct receipt tokens per chain
+  assert.equal(pa.balanceSources.length, 2);
+  const byChain = Object.fromEntries(pa.balanceSources.map((s) => [s.chainId, s]));
+  assert.equal(byChain[1672].token, '0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1');
+  assert.equal(byChain[1].token, '0xC3AaCb558aFB635307B66FDb405188138576fc4c');
+  assert.equal(byChain[1].rpcUrlEnv, 'ETHEREUM_RPC_URL');
+});

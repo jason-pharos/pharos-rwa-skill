@@ -2,7 +2,7 @@ import type { AdviceBundle, Envelope, Position, UpdateInfo, VaultMarket, VaultRe
 import { loadRegistry } from './config/remoteConfig.ts';
 import { fetchHarbor } from './sources/harbor.ts';
 import { fetchVaultInfo, type VaultInfo } from './sources/vaultInfo.ts';
-import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getShareBalanceHuman, getErc20Decimals, getVaultNavOnchain } from './sources/chain.ts';
+import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getErc20Decimals, getVaultNavOnchain } from './sources/chain.ts';
 import { resolveActionPeriod } from './logic/actionPeriod.ts';
 import { computePosition } from './logic/position.ts';
 import { buildReminders, type Reminder } from './logic/reminders.ts';
@@ -55,11 +55,19 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
 
   await Promise.allSettled(registry.map(async (entry) => {
     try {
-      const bal = await getShareBalanceHuman(entry.shareToken, address, provider);
-      if (bal.raw === 0n) return; // no position
-      const { nav, apy, apiInfo } = await navFor(entry, provider, bal.decimals);
+      // Sum share/receipt-token balance across ALL of the vault's chains
+      // (pALPHA = Pharos + Ethereum; APC3M = Pharos only). The --rpc/opts.rpc
+      // override applies to the Pharos chain (its documented meaning).
+      const rpcOverrides = opts.rpc ? { [DEFAULT_CHAIN_ID]: opts.rpc } : {};
+      const shares = await getVaultShares(entry.balanceSources, address, rpcOverrides);
+      // Surface per-chain balance-read failures without dropping the position.
+      for (const be of shares.errors) {
+        errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
+      }
+      if (shares.totalRaw === 0n) return; // no position on any chain
+      const { nav, apy, apiInfo } = await navFor(entry, provider, shares.decimals);
       const actionPeriod = resolveActionPeriod(entry, apiInfo, now);
-      positions.push(computePosition({ entry, sharesHuman: bal.human, nav, apy, actionPeriod, now }));
+      positions.push(computePosition({ entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now }));
     } catch (e) {
       errors.push({ scope: entry.id, error: String((e as Error).message ?? e) });
     }

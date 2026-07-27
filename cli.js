@@ -3058,6 +3058,15 @@ var DEFAULT_REGISTRY = [
     displayName: "AxilPrimeCredit-3M",
     chainId: 1672,
     shareToken: "0xEC47E6f3EF1E7bc8e00F670aC3d5016798Fe44d0",
+    balanceSources: [
+      {
+        chainId: 1672,
+        rpcUrlEnv: "PHAROS_RPC_URL",
+        rpcUrl: "https://rpc.pharos.xyz",
+        token: "0xEC47E6f3EF1E7bc8e00F670aC3d5016798Fe44d0",
+        decimals: 18
+      }
+    ],
     coreVault: "0xD0428799FbC35557834d33121BA4472692c8908a",
     usdc: "0xC879C018dB60520F4355C26eD1a6D572cdAC1815",
     navSource: "onchain",
@@ -3076,6 +3085,22 @@ var DEFAULT_REGISTRY = [
     displayName: "Pharos RealFi Ecosystem Vault",
     chainId: 1672,
     shareToken: "0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1",
+    balanceSources: [
+      {
+        chainId: 1672,
+        rpcUrlEnv: "PHAROS_RPC_URL",
+        rpcUrl: "https://rpc.pharos.xyz",
+        token: "0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1",
+        decimals: 6
+      },
+      {
+        chainId: 1,
+        rpcUrlEnv: "ETHEREUM_RPC_URL",
+        rpcUrl: "https://ethereum-rpc.publicnode.com",
+        token: "0xC3AaCb558aFB635307B66FDb405188138576fc4c",
+        decimals: 6
+      }
+    ],
     vaultId: "1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f",
     navSource: "api",
     entryNavBaseline: 1,
@@ -20662,17 +20687,45 @@ async function getErc20Balance(token, holder, provider) {
   const c = new Contract(token, ERC20_ABI, provider);
   return await c.balanceOf(holder);
 }
-async function getShareBalanceHuman(token, holder, provider) {
-  const [raw, decimals] = await Promise.all([
-    getErc20Balance(token, holder, provider),
-    getErc20Decimals(token, provider)
-  ]);
-  return { raw, decimals, human: formatUnits(raw, decimals) };
-}
 async function getVaultNavOnchain(coreVault, shareDecimals, assetDecimals, provider) {
   const c = new Contract(coreVault, VAULT_ABI, provider);
   const oneShare = 10n ** BigInt(shareDecimals);
   return toNumber2(await c.convertToAssets(oneShare), assetDecimals);
+}
+function resolveSourceRpc(src, rpcOverrides = {}) {
+  const override = rpcOverrides[src.chainId];
+  if (override && override.length > 0) return override;
+  const fromEnv = src.rpcUrlEnv ? process.env[src.rpcUrlEnv] : void 0;
+  return fromEnv && fromEnv.length > 0 ? fromEnv : src.rpcUrl;
+}
+function sumSourceBalances(ok, fallbackDecimals) {
+  const decimals = ok[0]?.decimals ?? fallbackDecimals;
+  let totalRaw = 0n;
+  for (const s of ok) {
+    if (s.decimals === decimals) totalRaw += s.raw;
+    else if (s.decimals < decimals) totalRaw += s.raw * 10n ** BigInt(decimals - s.decimals);
+    else totalRaw += s.raw / 10n ** BigInt(s.decimals - decimals);
+  }
+  return { totalRaw, decimals };
+}
+async function getVaultShares(sources, holder, rpcOverrides = {}) {
+  const results = await Promise.allSettled(
+    sources.map(async (src) => {
+      const provider = makeProvider(resolveSourceRpc(src, rpcOverrides), src.chainId);
+      const decimals2 = src.decimals ?? await getErc20Decimals(src.token, provider);
+      const raw = await getErc20Balance(src.token, holder, provider);
+      return { chainId: src.chainId, token: src.token, raw, decimals: decimals2, human: formatUnits(raw, decimals2) };
+    })
+  );
+  const ok = [];
+  const errors = [];
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") ok.push(r.value);
+    else errors.push({ chainId: sources[i].chainId, error: String(r.reason?.message ?? r.reason) });
+  });
+  const decimals = ok[0]?.decimals ?? sources[0]?.decimals ?? 18;
+  const { totalRaw } = sumSourceBalances(ok, decimals);
+  return { totalHuman: formatUnits(totalRaw, decimals), totalRaw, decimals, sources: ok, errors };
 }
 
 // src/util/time.ts
@@ -20910,11 +20963,15 @@ async function buildPositions(address, opts, errors) {
   const positions = [];
   await Promise.allSettled(registry.map(async (entry) => {
     try {
-      const bal = await getShareBalanceHuman(entry.shareToken, address, provider);
-      if (bal.raw === 0n) return;
-      const { nav, apy, apiInfo } = await navFor(entry, provider, bal.decimals);
+      const rpcOverrides = opts.rpc ? { [DEFAULT_CHAIN_ID]: opts.rpc } : {};
+      const shares = await getVaultShares(entry.balanceSources, address, rpcOverrides);
+      for (const be of shares.errors) {
+        errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
+      }
+      if (shares.totalRaw === 0n) return;
+      const { nav, apy, apiInfo } = await navFor(entry, provider, shares.decimals);
       const actionPeriod = resolveActionPeriod(entry, apiInfo, now);
-      positions.push(computePosition({ entry, sharesHuman: bal.human, nav, apy, actionPeriod, now }));
+      positions.push(computePosition({ entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now }));
     } catch (e) {
       errors.push({ scope: entry.id, error: String(e.message ?? e) });
     }

@@ -6,6 +6,15 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     displayName: 'AxilPrimeCredit-3M',
     chainId: 1672,
     shareToken: '0xEC47E6f3EF1E7bc8e00F670aC3d5016798Fe44d0',
+    balanceSources: [
+      {
+        chainId: 1672,
+        rpcUrlEnv: 'PHAROS_RPC_URL',
+        rpcUrl: 'https://rpc.pharos.xyz',
+        token: '0xEC47E6f3EF1E7bc8e00F670aC3d5016798Fe44d0',
+        decimals: 18,
+      },
+    ],
     coreVault: '0xD0428799FbC35557834d33121BA4472692c8908a',
     usdc: '0xC879C018dB60520F4355C26eD1a6D572cdAC1815',
     navSource: 'onchain',
@@ -24,6 +33,22 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     displayName: 'Pharos RealFi Ecosystem Vault',
     chainId: 1672,
     shareToken: '0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1',
+    balanceSources: [
+      {
+        chainId: 1672,
+        rpcUrlEnv: 'PHAROS_RPC_URL',
+        rpcUrl: 'https://rpc.pharos.xyz',
+        token: '0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1',
+        decimals: 6,
+      },
+      {
+        chainId: 1,
+        rpcUrlEnv: 'ETHEREUM_RPC_URL',
+        rpcUrl: 'https://ethereum-rpc.publicnode.com',
+        token: '0xC3AaCb558aFB635307B66FDb405188138576fc4c',
+        decimals: 6,
+      },
+    ],
     vaultId: '1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f',
     navSource: 'api',
     entryNavBaseline: 1.0,

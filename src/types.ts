@@ -1,11 +1,25 @@
 export type VaultId = 'APC3M' | 'pALPHA';
 export type NavSource = 'onchain' | 'api';
 
+/**
+ * One chain on which a vault's share/receipt token lives. A vault's total
+ * shares = sum of balanceOf across all its balance sources (pALPHA spans
+ * Pharos + Ethereum; APC3M has a single Pharos source).
+ */
+export interface BalanceSource {
+  chainId: number;
+  rpcUrlEnv?: string;          // env var name to override rpcUrl (e.g. ETHEREUM_RPC_URL)
+  rpcUrl: string;              // default RPC for this chain
+  token: string;               // ERC20 whose balanceOf = user shares on this chain
+  decimals?: number;           // if omitted, read on-chain
+}
+
 export interface VaultRegistryEntry {
   id: VaultId;
   displayName: string;
   chainId: number;
-  shareToken: string;          // ERC20 whose balanceOf = user shares
+  shareToken: string;          // ERC20 whose balanceOf = user shares (primary/Pharos)
+  balanceSources: BalanceSource[]; // all chains to sum shares from
   coreVault?: string;          // present when navSource === 'onchain'
   usdc?: string;
   vaultId?: string;            // Pharos vault-info API id (pALPHA)
