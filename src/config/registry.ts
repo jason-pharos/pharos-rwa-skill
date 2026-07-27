@@ -23,7 +23,7 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     id: 'pALPHA',
     displayName: 'Pharos RealFi Ecosystem Vault',
     chainId: 1672,
-    shareToken: '0xC3AaCb558aFB635307B66FDb405188138576fc4c',
+    shareToken: '0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1',
     vaultId: '1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f',
     navSource: 'api',
     entryNavBaseline: 1.0,
