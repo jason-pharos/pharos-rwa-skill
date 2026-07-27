@@ -18,6 +18,9 @@ Zero-dependency CLI to inspect Pharos RWA vault positions and market data. Outpu
 - User asks when they can withdraw / 什么时候能赎回、action period
 - User asks which vault to buy / 该买哪个金库、有什么新机会
 - User asks for the open-vault overview / 当前开放的金库概览
+- Scheduled/proactive: a daily job to remind the user of upcoming action
+  periods and surface new vault opportunities / 每日定时提醒 action period、
+  收集最新金库信息（见下方 "Proactive / scheduled use"）
 
 ## How to use / 如何使用
 
@@ -52,6 +55,36 @@ node cli.js upgrade
 ```
 
 Add `--pretty` to any command for indented JSON. Add `--no-remote` to skip remote config and version checks (offline).
+
+## Proactive / scheduled use / 定期主动使用
+
+This skill is read-only and does NOT schedule itself. The calling agent
+(openclaw / hermes / cron) is responsible for running it on a schedule and
+delivering results to the user (e.g. via Telegram). The skill only returns
+JSON; the agent decides cadence and delivery channel.
+
+Recommended daily job, per tracked user address:
+
+- **Action-period reminders (核心)** — run `reminders` daily; if any held
+  vault's `urgency` is `opening-soon`, `open`, or `closing-soon`, proactively
+  message the user that they can (soon) start a withdraw. 每日跑，action
+  period 即将开启/进行中/即将关闭时主动提醒用户。
+
+  ```bash
+  node cli.js reminders 0xUserAddress
+  ```
+
+- **Latest vault info + buy advice** — run `vaults` (market-wide, no address)
+  or `advise` (personalized) daily; when a new `topPick` appears or a
+  high-APY vault the user does not hold shows up (`gapVaults`), prompt whether
+  it is worth buying. 每日收集最新金库信息，出现新机会时提示是否值得买入。
+
+  ```bash
+  node cli.js advise 0xUserAddress
+  ```
+
+Only notify the user when there is something actionable (an urgency worth
+acting on, or a genuinely new opportunity) — do not send an empty daily ping.
 
 ## Interpreting output
 
