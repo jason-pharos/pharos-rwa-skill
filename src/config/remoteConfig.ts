@@ -18,11 +18,14 @@ export function mergeRegistry(base: VaultRegistryEntry[], override: unknown): Va
   return base.map((entry) => {
     const patch = o.vaults.find((v) => v && v.id === entry.id);
     if (!patch) return entry;
+    // Only allow specific fields to be overridden from remote config.
+    // Identity/address fields (id, displayName, chainId, shareToken, coreVault, usdc, vaultId, navSource)
+    // are always taken from the base and protected from override.
     return {
       ...entry,
-      ...patch,
+      apyFallback: patch.apyFallback ?? entry.apyFallback,
+      entryNavBaseline: patch.entryNavBaseline ?? entry.entryNavBaseline,
       actionPeriodConfig: { ...entry.actionPeriodConfig, ...(patch.actionPeriodConfig ?? {}) },
-      id: entry.id, // never let override change identity/addresses implicitly
     };
   });
 }
