@@ -51,6 +51,14 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     ],
     vaultId: '1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f',
     navSource: 'api',
+    // On-chain fallback: the Pharos receipt token is ERC4626-like and exposes
+    // convertToAssets; asset is USDC (6 decimals). Used if the vault-info API
+    // is unavailable / returns no price.
+    navOnchainFallback: {
+      vault: '0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1',
+      shareDecimals: 6,
+      assetDecimals: 6,
+    },
     entryNavBaseline: 1.0,
     apyFallback: 0.14,
     actionPeriodConfig: {

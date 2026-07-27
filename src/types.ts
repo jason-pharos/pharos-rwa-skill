@@ -24,6 +24,18 @@ export interface VaultRegistryEntry {
   usdc?: string;
   vaultId?: string;            // Pharos vault-info API id (pALPHA)
   navSource: NavSource;
+  /**
+   * Optional on-chain NAV fallback (ERC4626 convertToAssets). Used when
+   * navSource is 'api' but the API is unavailable / returns no price — the
+   * receipt token itself is queried on Pharos. `vault` is the ERC4626-style
+   * contract (the Pharos receipt token for pALPHA); assetDecimals is the
+   * underlying asset's decimals (USDC = 6).
+   */
+  navOnchainFallback?: {
+    vault: string;
+    shareDecimals: number;
+    assetDecimals: number;
+  };
   entryNavBaseline: number;    // epoch-NAV approximation entry price
   apyFallback: number;         // decimal, e.g. 0.14
   actionPeriodConfig: {        // fallback / sole source for APC3M

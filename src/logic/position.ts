@@ -10,8 +10,9 @@ export function computePosition(args: {
   apy: number | null;
   actionPeriod: ActionPeriod;
   now: number;
+  navResolvedFrom?: string;
 }): Position {
-  const { entry, sharesHuman, nav, apy, actionPeriod, now } = args;
+  const { entry, sharesHuman, nav, apy, actionPeriod, now, navResolvedFrom } = args;
   const shares = Number(sharesHuman);
   const currentValue = nav != null ? shares * nav : null;
   const principal = shares * entry.entryNavBaseline;
@@ -31,7 +32,11 @@ export function computePosition(args: {
     nav,
     currentValue,
     estimated: true,
-    assumptions: { entryNav: entry.entryNavBaseline, navSource: entry.navSource },
+    assumptions: {
+      entryNav: entry.entryNavBaseline,
+      navSource: entry.navSource,
+      navResolvedFrom: navResolvedFrom ?? entry.navSource,
+    },
     principal,
     realizedYield,
     depositedDurationDays,

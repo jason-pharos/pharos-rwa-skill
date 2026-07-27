@@ -29,3 +29,14 @@ test('null nav → null value/yield but principal still set', () => {
   assert.equal(p.realizedYield, null);
   assert.equal(p.principal, 50);
 });
+
+test('computePosition records navResolvedFrom in assumptions', () => {
+  const now = Math.floor(Date.parse('2026-07-27T00:00:00+08:00') / 1000);
+  const p = computePosition({ entry, sharesHuman: '100', nav: 1.03, apy: 0.14, actionPeriod: ap, now, navResolvedFrom: 'onchain-fallback' });
+  assert.equal(p.assumptions.navResolvedFrom, 'onchain-fallback');
+});
+test('computePosition navResolvedFrom defaults to entry.navSource', () => {
+  const now = Math.floor(Date.parse('2026-07-27T00:00:00+08:00') / 1000);
+  const p = computePosition({ entry, sharesHuman: '100', nav: 1.03, apy: 0.14, actionPeriod: ap, now });
+  assert.equal(p.assumptions.navResolvedFrom, entry.navSource);
+});

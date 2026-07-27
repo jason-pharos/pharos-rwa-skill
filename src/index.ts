@@ -34,17 +34,37 @@ export async function runVaults(opts: RunOpts): Promise<Envelope<{ vaults: Vault
   return makeEnvelope({ vaults }, errors, await safeUpdate(opts));
 }
 
-async function navFor(entry: VaultRegistryEntry, provider: ReturnType<typeof makeProvider>, shareDecimals: number): Promise<{ nav: number | null; apy: number | null; apiInfo: VaultInfo | null }> {
+type NavResult = { nav: number | null; apy: number | null; apiInfo: VaultInfo | null; navResolvedFrom: 'api' | 'onchain' | 'onchain-fallback' | 'none' };
+
+async function navFor(entry: VaultRegistryEntry, provider: ReturnType<typeof makeProvider>, shareDecimals: number): Promise<NavResult> {
   if (entry.navSource === 'api' && entry.vaultId) {
-    const info = await fetchVaultInfo(entry.vaultId);
-    return { nav: info.nav, apy: info.apy, apiInfo: info };
+    let apiInfo: VaultInfo | null = null;
+    try {
+      apiInfo = await fetchVaultInfo(entry.vaultId);
+    } catch {
+      apiInfo = null; // API failed entirely — try on-chain fallback below
+    }
+    if (apiInfo && apiInfo.nav != null) {
+      return { nav: apiInfo.nav, apy: apiInfo.apy, apiInfo, navResolvedFrom: 'api' };
+    }
+    // API unavailable or returned no price → on-chain ERC4626 convertToAssets fallback.
+    if (entry.navOnchainFallback) {
+      const fb = entry.navOnchainFallback;
+      try {
+        const nav = await getVaultNavOnchain(fb.vault, fb.shareDecimals, fb.assetDecimals, provider);
+        return { nav, apy: apiInfo?.apy ?? entry.apyFallback, apiInfo, navResolvedFrom: 'onchain-fallback' };
+      } catch {
+        // fall through to null
+      }
+    }
+    return { nav: apiInfo?.nav ?? null, apy: apiInfo?.apy ?? entry.apyFallback, apiInfo, navResolvedFrom: 'none' };
   }
   if (entry.navSource === 'onchain' && entry.coreVault && entry.usdc) {
     const usdcDecimals = await getErc20Decimals(entry.usdc, provider);
     const nav = await getVaultNavOnchain(entry.coreVault, shareDecimals, usdcDecimals, provider);
-    return { nav, apy: entry.apyFallback, apiInfo: null };
+    return { nav, apy: entry.apyFallback, apiInfo: null, navResolvedFrom: 'onchain' };
   }
-  return { nav: null, apy: entry.apyFallback, apiInfo: null };
+  return { nav: null, apy: entry.apyFallback, apiInfo: null, navResolvedFrom: 'none' };
 }
 
 async function buildPositions(address: string, opts: RunOpts, errors: Envelope<unknown>['errors']): Promise<Position[]> {
@@ -65,9 +85,9 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
         errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
       }
       if (shares.totalRaw === 0n) return; // no position on any chain
-      const { nav, apy, apiInfo } = await navFor(entry, provider, shares.decimals);
+      const { nav, apy, apiInfo, navResolvedFrom } = await navFor(entry, provider, shares.decimals);
       const actionPeriod = resolveActionPeriod(entry, apiInfo, now);
-      positions.push(computePosition({ entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now }));
+      positions.push(computePosition({ entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now, navResolvedFrom }));
     } catch (e) {
       errors.push({ scope: entry.id, error: String((e as Error).message ?? e) });
     }
