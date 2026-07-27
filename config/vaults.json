@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "vaults": [
+    {
+      "id": "APC3M",
+      "actionPeriodConfig": {
+        "lockStart": "2026-07-20T00:00:00+08:00",
+        "lockEnd": "2026-10-20T23:59:59+08:00",
+        "actionStart": "2026-07-20T00:00:00+08:00",
+        "actionEnd": "2026-10-16T00:00:00+08:00",
+        "withdrawable": "2026-10-20"
+      },
+      "apyFallback": 0.14,
+      "entryNavBaseline": 1.0
+    }
+  ]
+}
