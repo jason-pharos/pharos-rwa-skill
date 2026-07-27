@@ -1,6 +1,6 @@
 ---
 name: pharos-rwa-manager
-description: "Manage Pharos RWA vault positions (APC3M, pALPHA). Triggers: RWA 持仓, action period 提醒, 什么时候能赎回, when can I withdraw, Pharos vault 建议, 该买哪个金库, my APC3M position, pALPHA 收益, harbor 金库概览"
+description: "Inspect and manage a user's Pharos RWA vault holdings (APC3M, pALPHA): position value and estimated yield, action-period / withdraw-window reminders, live market overview, and buy/allocation advice. Use this skill whenever the user asks about their Pharos or RWA vault position, APC3M or pALPHA holdings/收益, when they can withdraw or redeem (action period / 什么时候能赎回 / when can I withdraw), which vault to buy or whether to add a new one (该买哪个金库 / Pharos vault 建议), or wants the harbor 金库概览 / open-vault overview — even if they don't name the vault or say 'skill' explicitly. Runs read-only via a zero-dependency CLI given the user's address."
 metadata:
   user-invocable: "true"
   arguments: "vaults | position <address> | reminders <address> | advise <address> | upgrade"
