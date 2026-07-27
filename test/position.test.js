@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { computePosition } from '../src/logic/position.ts';
 
 const entry = {
-  id: 'APC3M', navSource: 'onchain', entryNavBaseline: 1.0, apyFallback: 0.14,
+  id: 'APC3M', entryNavBaseline: 1.0, apyFallback: 0.14,
   actionPeriodConfig: {
     lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-20T23:59:59+08:00',
     actionStart: '2026-07-20T00:00:00+08:00', actionEnd: '2026-10-16T00:00:00+08:00', withdrawable: '2026-10-20',
@@ -32,11 +32,11 @@ test('null nav → null value/yield but principal still set', () => {
 
 test('computePosition records navResolvedFrom in assumptions', () => {
   const now = Math.floor(Date.parse('2026-07-27T00:00:00+08:00') / 1000);
-  const p = computePosition({ entry, sharesHuman: '100', nav: 1.03, apy: 0.14, actionPeriod: ap, now, navResolvedFrom: 'onchain-fallback' });
-  assert.equal(p.assumptions.navResolvedFrom, 'onchain-fallback');
+  const p = computePosition({ entry, sharesHuman: '100', nav: 1.03, apy: 0.14, actionPeriod: ap, now, navResolvedFrom: 'onchain' });
+  assert.equal(p.assumptions.navResolvedFrom, 'onchain');
 });
-test('computePosition navResolvedFrom defaults to entry.navSource', () => {
+test('computePosition navResolvedFrom defaults to onchain', () => {
   const now = Math.floor(Date.parse('2026-07-27T00:00:00+08:00') / 1000);
   const p = computePosition({ entry, sharesHuman: '100', nav: 1.03, apy: 0.14, actionPeriod: ap, now });
-  assert.equal(p.assumptions.navResolvedFrom, entry.navSource);
+  assert.equal(p.assumptions.navResolvedFrom, 'onchain');
 });

@@ -3067,9 +3067,12 @@ var DEFAULT_REGISTRY = [
         decimals: 18
       }
     ],
-    coreVault: "0xD0428799FbC35557834d33121BA4472692c8908a",
-    usdc: "0xC879C018dB60520F4355C26eD1a6D572cdAC1815",
-    navSource: "onchain",
+    // NAV on-chain: CoreVault.convertToAssets(1 share); share 18 decimals, asset USDC 6.
+    onchainNav: {
+      vault: "0xD0428799FbC35557834d33121BA4472692c8908a",
+      shareDecimals: 18,
+      assetDecimals: 6
+    },
     entryNavBaseline: 1,
     apyFallback: 0.14,
     actionPeriodConfig: {
@@ -3101,16 +3104,15 @@ var DEFAULT_REGISTRY = [
         decimals: 6
       }
     ],
-    vaultId: "1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f",
-    navSource: "api",
-    // On-chain fallback: the Pharos receipt token is ERC4626-like and exposes
-    // convertToAssets; asset is USDC (6 decimals). Used if the vault-info API
-    // is unavailable / returns no price.
-    navOnchainFallback: {
+    // NAV on-chain: the Pharos receipt token is ERC4626-like and exposes
+    // convertToAssets; share + asset (USDC) both 6 decimals.
+    onchainNav: {
       vault: "0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1",
       shareDecimals: 6,
       assetDecimals: 6
     },
+    // pALPHA-specific Ember/Bluefin vault-info API: APY + action period only (NOT NAV).
+    vaultInfoApiId: "1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f",
     entryNavBaseline: 1,
     apyFallback: 0.14,
     actionPeriodConfig: {
@@ -20782,7 +20784,7 @@ function pickPhase(phases, now) {
   return [...phases].sort((a, b2) => b2.endTs - a.endTs)[0] ?? null;
 }
 function resolveActionPeriod(entry, apiInfo, now) {
-  if (entry.navSource === "api" && apiInfo) {
+  if (entry.vaultInfoApiId && apiInfo) {
     const phase = pickPhase(apiInfo.phases, now);
     if (phase) return build(phase.startTs, phase.endTs, apiInfo.withdrawableTs, "api", now);
   }
@@ -20816,8 +20818,7 @@ function computePosition(args) {
     estimated: true,
     assumptions: {
       entryNav: entry.entryNavBaseline,
-      navSource: entry.navSource,
-      navResolvedFrom: navResolvedFrom ?? entry.navSource
+      navResolvedFrom: navResolvedFrom ?? "onchain"
     },
     principal,
     realizedYield,
@@ -20956,33 +20957,26 @@ async function runVaults(opts) {
   }
   return makeEnvelope({ vaults }, errors, await safeUpdate(opts));
 }
-async function navFor(entry, provider, shareDecimals) {
-  if (entry.navSource === "api" && entry.vaultId) {
-    let apiInfo = null;
-    try {
-      apiInfo = await fetchVaultInfo(entry.vaultId);
-    } catch {
-      apiInfo = null;
-    }
-    if (apiInfo && apiInfo.nav != null) {
-      return { nav: apiInfo.nav, apy: apiInfo.apy, apiInfo, navResolvedFrom: "api" };
-    }
-    if (entry.navOnchainFallback) {
-      const fb = entry.navOnchainFallback;
-      try {
-        const nav = await getVaultNavOnchain(fb.vault, fb.shareDecimals, fb.assetDecimals, provider);
-        return { nav, apy: apiInfo?.apy ?? entry.apyFallback, apiInfo, navResolvedFrom: "onchain-fallback" };
-      } catch {
-      }
-    }
-    return { nav: apiInfo?.nav ?? null, apy: apiInfo?.apy ?? entry.apyFallback, apiInfo, navResolvedFrom: "none" };
+async function navFor(entry, provider) {
+  const { vault, shareDecimals, assetDecimals } = entry.onchainNav;
+  let nav = null;
+  let navResolvedFrom = "none";
+  try {
+    nav = await getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
+    navResolvedFrom = "onchain";
+  } catch {
+    nav = null;
   }
-  if (entry.navSource === "onchain" && entry.coreVault && entry.usdc) {
-    const usdcDecimals = await getErc20Decimals(entry.usdc, provider);
-    const nav = await getVaultNavOnchain(entry.coreVault, shareDecimals, usdcDecimals, provider);
-    return { nav, apy: entry.apyFallback, apiInfo: null, navResolvedFrom: "onchain" };
+  if (!entry.vaultInfoApiId) {
+    return { nav, apy: entry.apyFallback, apiInfo: null, navResolvedFrom };
   }
-  return { nav: null, apy: entry.apyFallback, apiInfo: null, navResolvedFrom: "none" };
+  let apiInfo = null;
+  try {
+    apiInfo = await fetchVaultInfo(entry.vaultInfoApiId);
+  } catch {
+    apiInfo = null;
+  }
+  return { nav, apy: apiInfo?.apy ?? entry.apyFallback, apiInfo, navResolvedFrom };
 }
 async function buildPositions(address, opts, errors) {
   const registry = await loadRegistry({ noRemote: opts.noRemote });
@@ -20997,7 +20991,7 @@ async function buildPositions(address, opts, errors) {
         errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
       }
       if (shares.totalRaw === 0n) return;
-      const { nav, apy, apiInfo, navResolvedFrom } = await navFor(entry, provider, shares.decimals);
+      const { nav, apy, apiInfo, navResolvedFrom } = await navFor(entry, provider);
       const actionPeriod = resolveActionPeriod(entry, apiInfo, now);
       positions.push(computePosition({ entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now, navResolvedFrom }));
     } catch (e) {

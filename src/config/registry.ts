@@ -15,9 +15,12 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
         decimals: 18,
       },
     ],
-    coreVault: '0xD0428799FbC35557834d33121BA4472692c8908a',
-    usdc: '0xC879C018dB60520F4355C26eD1a6D572cdAC1815',
-    navSource: 'onchain',
+    // NAV on-chain: CoreVault.convertToAssets(1 share); share 18 decimals, asset USDC 6.
+    onchainNav: {
+      vault: '0xD0428799FbC35557834d33121BA4472692c8908a',
+      shareDecimals: 18,
+      assetDecimals: 6,
+    },
     entryNavBaseline: 1.0,
     apyFallback: 0.14,
     actionPeriodConfig: {
@@ -49,16 +52,15 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
         decimals: 6,
       },
     ],
-    vaultId: '1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f',
-    navSource: 'api',
-    // On-chain fallback: the Pharos receipt token is ERC4626-like and exposes
-    // convertToAssets; asset is USDC (6 decimals). Used if the vault-info API
-    // is unavailable / returns no price.
-    navOnchainFallback: {
+    // NAV on-chain: the Pharos receipt token is ERC4626-like and exposes
+    // convertToAssets; share + asset (USDC) both 6 decimals.
+    onchainNav: {
       vault: '0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1',
       shareDecimals: 6,
       assetDecimals: 6,
     },
+    // pALPHA-specific Ember/Bluefin vault-info API: APY + action period only (NOT NAV).
+    vaultInfoApiId: '1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f',
     entryNavBaseline: 1.0,
     apyFallback: 0.14,
     actionPeriodConfig: {

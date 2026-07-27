@@ -2,6 +2,11 @@ import { fetchJson } from '../util/http.ts';
 
 export interface VaultInfo {
   apy: number | null;
+  /**
+   * The API's reported receipt-token price. NOT used for position NAV — NAV is
+   * always read on-chain (ERC4626 convertToAssets). Kept as a faithful mirror
+   * of the API field for reference/debugging only.
+   */
   nav: number | null;
   withdrawableTs: number | null;
   minWithdrawalShares: number | null;

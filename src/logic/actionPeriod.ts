@@ -28,7 +28,9 @@ function pickPhase(phases: VaultInfo['phases'], now: number): { startTs: number;
 }
 
 export function resolveActionPeriod(entry: VaultRegistryEntry, apiInfo: VaultInfo | null, now: number): ActionPeriod {
-  if (entry.navSource === 'api' && apiInfo) {
+  // Only pALPHA has a vault-info API (entry.vaultInfoApiId); its phases drive
+  // the action period. Everything else uses the configured window.
+  if (entry.vaultInfoApiId && apiInfo) {
     const phase = pickPhase(apiInfo.phases, now);
     if (phase) return build(phase.startTs, phase.endTs, apiInfo.withdrawableTs, 'api', now);
   }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { resolveActionPeriod } from '../src/logic/actionPeriod.ts';
 
 const apc = {
-  id: 'APC3M', navSource: 'onchain',
+  id: 'APC3M',
   actionPeriodConfig: {
     lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-20T23:59:59+08:00',
     actionStart: '2026-07-20T00:00:00+08:00', actionEnd: '2026-10-16T00:00:00+08:00',
@@ -11,7 +11,7 @@ const apc = {
   },
 };
 const pa = {
-  id: 'pALPHA', navSource: 'api',
+  id: 'pALPHA', vaultInfoApiId: '1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f',
   actionPeriodConfig: apc.actionPeriodConfig,
 };
 
@@ -46,7 +46,7 @@ test('pALPHA falls back to config when API empty', () => {
 });
 
 test('unavailable when config unparseable and no api', () => {
-  const broken = { id: 'APC3M', navSource: 'onchain', actionPeriodConfig: { actionStart: 'nope', actionEnd: 'nope', withdrawable: 'nope', lockStart: 'x', lockEnd: 'x' } };
+  const broken = { id: 'APC3M', actionPeriodConfig: { actionStart: 'nope', actionEnd: 'nope', withdrawable: 'nope', lockStart: 'x', lockEnd: 'x' } };
   const ap = resolveActionPeriod(broken, null, 1000);
   assert.equal(ap.source, 'unavailable');
   assert.equal(ap.startTs, null);

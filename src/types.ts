@@ -1,5 +1,4 @@
 export type VaultId = 'APC3M' | 'pALPHA';
-export type NavSource = 'onchain' | 'api';
 
 /**
  * One chain on which a vault's share/receipt token lives. A vault's total
@@ -14,31 +13,35 @@ export interface BalanceSource {
   decimals?: number;           // if omitted, read on-chain
 }
 
+/**
+ * On-chain NAV source: an ERC4626-style vault whose convertToAssets(1 share)
+ * gives the share price. NAV is ALWAYS read on-chain for every vault.
+ * - APC3M: the CoreVault contract, asset = USDC.
+ * - pALPHA: the Pharos receipt token itself (it is ERC4626-like), asset = USDC.
+ */
+export interface OnchainNav {
+  vault: string;               // ERC4626-style contract to call convertToAssets on
+  shareDecimals: number;       // decimals of 1 whole share
+  assetDecimals: number;       // decimals of the underlying asset (USDC = 6)
+}
+
 export interface VaultRegistryEntry {
   id: VaultId;
   displayName: string;
   chainId: number;
   shareToken: string;          // ERC20 whose balanceOf = user shares (primary/Pharos)
   balanceSources: BalanceSource[]; // all chains to sum shares from
-  coreVault?: string;          // present when navSource === 'onchain'
-  usdc?: string;
-  vaultId?: string;            // Pharos vault-info API id (pALPHA)
-  navSource: NavSource;
+  onchainNav: OnchainNav;      // NAV is always read on-chain via convertToAssets
   /**
-   * Optional on-chain NAV fallback (ERC4626 convertToAssets). Used when
-   * navSource is 'api' but the API is unavailable / returns no price — the
-   * receipt token itself is queried on Pharos. `vault` is the ERC4626-style
-   * contract (the Pharos receipt token for pALPHA); assetDecimals is the
-   * underlying asset's decimals (USDC = 6).
+   * pALPHA ONLY: the Ember/Bluefin vault-info API id. This API is
+   * pALPHA-specific (not a general mechanism) and is used to fetch APY and
+   * the action-period phases/withdrawable timestamp — NOT NAV. When absent
+   * (APC3M), APY and action period come from apyFallback / actionPeriodConfig.
    */
-  navOnchainFallback?: {
-    vault: string;
-    shareDecimals: number;
-    assetDecimals: number;
-  };
+  vaultInfoApiId?: string;
   entryNavBaseline: number;    // epoch-NAV approximation entry price
   apyFallback: number;         // decimal, e.g. 0.14
-  actionPeriodConfig: {        // fallback / sole source for APC3M
+  actionPeriodConfig: {        // fallback (pALPHA) / sole source (APC3M)
     lockStart: string;         // ISO8601 with tz
     lockEnd: string;
     actionStart: string;

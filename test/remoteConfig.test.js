@@ -11,7 +11,7 @@ test('override merges by id, keeps unknown defaults intact', () => {
   const apc = merged.find((v) => v.id === 'APC3M');
   const pa = merged.find((v) => v.id === 'pALPHA');
   assert.equal(apc.apyFallback, 0.2);
-  assert.equal(apc.coreVault, '0xD0428799FbC35557834d33121BA4472692c8908a'); // untouched
+  assert.equal(apc.onchainNav.vault, '0xD0428799FbC35557834d33121BA4472692c8908a'); // untouched
   assert.equal(pa.apyFallback, 0.14); // untouched
 });
 
@@ -27,10 +27,9 @@ test('identity/address fields protected from remote override', () => {
       {
         id: 'APC3M',
         shareToken: '0xATTACKER0000000000000000000000000000001111',
-        coreVault: '0xATTACKER0000000000000000000000000000002222',
-        usdc: '0xATTACKER0000000000000000000000000000003333',
+        onchainNav: { vault: '0xATTACKER0000000000000000000000000000002222', shareDecimals: 0, assetDecimals: 0 },
         chainId: 999,
-        navSource: 'api',
+        vaultInfoApiId: 'hacked-id',
         displayName: 'HACKED',
         apyFallback: 0.5,
       },
@@ -39,10 +38,10 @@ test('identity/address fields protected from remote override', () => {
   const apc = merged.find((v) => v.id === 'APC3M');
   // Identity/address fields are unchanged despite override attempts
   assert.equal(apc.shareToken, '0xEC47E6f3EF1E7bc8e00F670aC3d5016798Fe44d0');
-  assert.equal(apc.coreVault, '0xD0428799FbC35557834d33121BA4472692c8908a');
-  assert.equal(apc.usdc, '0xC879C018dB60520F4355C26eD1a6D572cdAC1815');
+  assert.equal(apc.onchainNav.vault, '0xD0428799FbC35557834d33121BA4472692c8908a');
+  assert.equal(apc.onchainNav.assetDecimals, 6);
   assert.equal(apc.chainId, 1672);
-  assert.equal(apc.navSource, 'onchain');
+  assert.equal(apc.vaultInfoApiId, undefined); // APC3M has no vault-info API; not injectable
   assert.equal(apc.displayName, 'AxilPrimeCredit-3M');
   // Only policy/value fields can be overridden
   assert.equal(apc.apyFallback, 0.5);

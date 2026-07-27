@@ -2,7 +2,7 @@ import type { AdviceBundle, Envelope, Position, UpdateInfo, VaultMarket, VaultRe
 import { loadRegistry } from './config/remoteConfig.ts';
 import { fetchHarbor } from './sources/harbor.ts';
 import { fetchVaultInfo, type VaultInfo } from './sources/vaultInfo.ts';
-import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getErc20Decimals, getVaultNavOnchain } from './sources/chain.ts';
+import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getVaultNavOnchain } from './sources/chain.ts';
 import { resolveActionPeriod } from './logic/actionPeriod.ts';
 import { computePosition } from './logic/position.ts';
 import { buildReminders, type Reminder } from './logic/reminders.ts';
@@ -34,37 +34,40 @@ export async function runVaults(opts: RunOpts): Promise<Envelope<{ vaults: Vault
   return makeEnvelope({ vaults }, errors, await safeUpdate(opts));
 }
 
-type NavResult = { nav: number | null; apy: number | null; apiInfo: VaultInfo | null; navResolvedFrom: 'api' | 'onchain' | 'onchain-fallback' | 'none' };
+type NavResult = { nav: number | null; apy: number | null; apiInfo: VaultInfo | null; navResolvedFrom: 'onchain' | 'none' };
 
-async function navFor(entry: VaultRegistryEntry, provider: ReturnType<typeof makeProvider>, shareDecimals: number): Promise<NavResult> {
-  if (entry.navSource === 'api' && entry.vaultId) {
-    let apiInfo: VaultInfo | null = null;
-    try {
-      apiInfo = await fetchVaultInfo(entry.vaultId);
-    } catch {
-      apiInfo = null; // API failed entirely — try on-chain fallback below
-    }
-    if (apiInfo && apiInfo.nav != null) {
-      return { nav: apiInfo.nav, apy: apiInfo.apy, apiInfo, navResolvedFrom: 'api' };
-    }
-    // API unavailable or returned no price → on-chain ERC4626 convertToAssets fallback.
-    if (entry.navOnchainFallback) {
-      const fb = entry.navOnchainFallback;
-      try {
-        const nav = await getVaultNavOnchain(fb.vault, fb.shareDecimals, fb.assetDecimals, provider);
-        return { nav, apy: apiInfo?.apy ?? entry.apyFallback, apiInfo, navResolvedFrom: 'onchain-fallback' };
-      } catch {
-        // fall through to null
-      }
-    }
-    return { nav: apiInfo?.nav ?? null, apy: apiInfo?.apy ?? entry.apyFallback, apiInfo, navResolvedFrom: 'none' };
+/**
+ * Resolve NAV / APY / action-period inputs for one vault. Data-driven (no
+ * per-vault-id branching):
+ *  - NAV is ALWAYS read on-chain (ERC4626 convertToAssets via entry.onchainNav).
+ *    A read failure degrades to nav:null (position still shows shares/principal)
+ *    rather than dropping the whole position.
+ *  - If (and only if) the vault declares a vaultInfoApiId, its pALPHA-specific
+ *    Ember/Bluefin vault-info API is fetched for APY + action-period phases
+ *    (NOT NAV). API failure → apy fallback + apiInfo null (action period then
+ *    falls back to actionPeriodConfig in resolveActionPeriod).
+ */
+async function navFor(entry: VaultRegistryEntry, provider: ReturnType<typeof makeProvider>): Promise<NavResult> {
+  const { vault, shareDecimals, assetDecimals } = entry.onchainNav;
+  let nav: number | null = null;
+  let navResolvedFrom: NavResult['navResolvedFrom'] = 'none';
+  try {
+    nav = await getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
+    navResolvedFrom = 'onchain';
+  } catch {
+    nav = null; // degrade gracefully; principal/shares still reported
   }
-  if (entry.navSource === 'onchain' && entry.coreVault && entry.usdc) {
-    const usdcDecimals = await getErc20Decimals(entry.usdc, provider);
-    const nav = await getVaultNavOnchain(entry.coreVault, shareDecimals, usdcDecimals, provider);
-    return { nav, apy: entry.apyFallback, apiInfo: null, navResolvedFrom: 'onchain' };
+
+  if (!entry.vaultInfoApiId) {
+    return { nav, apy: entry.apyFallback, apiInfo: null, navResolvedFrom };
   }
-  return { nav: null, apy: entry.apyFallback, apiInfo: null, navResolvedFrom: 'none' };
+  let apiInfo: VaultInfo | null = null;
+  try {
+    apiInfo = await fetchVaultInfo(entry.vaultInfoApiId);
+  } catch {
+    apiInfo = null; // APY falls back; action period falls back to config
+  }
+  return { nav, apy: apiInfo?.apy ?? entry.apyFallback, apiInfo, navResolvedFrom };
 }
 
 async function buildPositions(address: string, opts: RunOpts, errors: Envelope<unknown>['errors']): Promise<Position[]> {
@@ -85,7 +88,7 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
         errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
       }
       if (shares.totalRaw === 0n) return; // no position on any chain
-      const { nav, apy, apiInfo, navResolvedFrom } = await navFor(entry, provider, shares.decimals);
+      const { nav, apy, apiInfo, navResolvedFrom } = await navFor(entry, provider);
       const actionPeriod = resolveActionPeriod(entry, apiInfo, now);
       positions.push(computePosition({ entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now, navResolvedFrom }));
     } catch (e) {

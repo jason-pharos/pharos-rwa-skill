@@ -34,8 +34,7 @@ export function computePosition(args: {
     estimated: true,
     assumptions: {
       entryNav: entry.entryNavBaseline,
-      navSource: entry.navSource,
-      navResolvedFrom: navResolvedFrom ?? entry.navSource,
+      navResolvedFrom: navResolvedFrom ?? 'onchain',
     },
     principal,
     realizedYield,
