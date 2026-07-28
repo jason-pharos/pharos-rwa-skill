@@ -2,6 +2,39 @@
 
 Zero-dependency Node CLI skill for managing Pharos RWA vault positions (APC3M, pALPHA).
 
+## Install as a Claude Code skill / 安装
+
+Requires Node.js >= 18. No `npm install` needed — `cli.js` is a committed, dependency-free bundle.
+
+Personal skill (available in every project):
+
+```bash
+git clone git@github.com:jason-pharos/pharos-rwa-skill.git ~/.claude/skills/pharos-rwa-manager
+```
+
+Project skill (shared with the repo, available only in that project):
+
+```bash
+cd /path/to/your/project
+git clone git@github.com:jason-pharos/pharos-rwa-skill.git .claude/skills/pharos-rwa-manager
+```
+
+The directory must contain `SKILL.md` at its top level — that's what Claude Code loads. Restart Claude Code (or start a new session) and the `pharos-rwa-manager` skill will be listed; invoke it with `/pharos-rwa-manager`, or just ask about your Pharos / RWA position and it triggers automatically.
+
+Verify the install:
+
+```bash
+node ~/.claude/skills/pharos-rwa-manager/cli.js vaults --pretty
+```
+
+Update to the latest version:
+
+```bash
+cd ~/.claude/skills/pharos-rwa-manager && git pull
+```
+
+`node cli.js upgrade` also self-updates `cli.js` from the newest GitHub Release.
+
 ## Run (end users / agents — no install)
 
 ```bash
