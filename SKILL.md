@@ -109,5 +109,8 @@ acting on, or a genuinely new opportunity) — do not send an empty daily ping.
 
 - Top level: `{ ok, generatedAt, updateAvailable?, data, errors }`. If `updateAvailable` is present, tell the user a newer version exists and they can run `node cli.js upgrade`.
 - Position fields are ESTIMATES: `estimated: true` with `assumptions` (entry NAV baseline). Say "约/estimated", not exact figures, for `principal`/`realizedYield`/`expectedTotalYield`.
+- `assumptions.valueResolvedFrom: "ember-api"` (pALPHA) means value/yield came from the vault's own accounts API, so `principal` is the real cost basis rather than an entry-NAV approximation — those numbers are the most trustworthy. Such positions also carry `yieldBreakdown` (`realized` = already settled, `unrealized` = still in the position, `total` = `realizedYield`). Without that assumption the position fell back to on-chain `shares × NAV`; check `errors[]` for a `<vault>:ember` entry.
+- `realizedYield` is yield earned SO FAR (cumulative since the holder deposited, which may span earlier epochs). `expectedTotalYield` is forward-looking for every vault — earned-to-date plus APY applied to the remaining lock time (`assumptions.expectedYieldBasis`) — so it is a projection for lock end, not an extra amount on top of `realizedYield`.
+- `actionPeriod.end` (withdraw-request deadline) and `withdrawableDate` (when funds actually come back) are different dates: for pALPHA the request window closes 2026-10-01 but funds are withdrawable 2026-10-20. Don't conflate them when reminding the user.
 - `actionPeriod.source` is `api`, `config`, or `unavailable`. If `unavailable`, say the withdraw window is currently unknown.
 - `errors[]` lists per-scope failures; other data is still valid (partial success).

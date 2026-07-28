@@ -23,6 +23,29 @@ test('computes current value, principal, realized yield', () => {
   assert.ok(p.expectedTotalYield > 0);
 });
 
+test('expectedTotalYield projects earned-to-date forward to lock end', () => {
+  const now = Math.floor(Date.parse('2026-07-27T00:00:00+08:00') / 1000);
+  const p = computePosition({ entry, sharesHuman: '100', nav: 1.03, apy: 0.14, actionPeriod: ap, now });
+  const yearsLeft = (Date.parse('2026-10-20T23:59:59+08:00') - Date.parse('2026-07-27T00:00:00+08:00')) / 1000 / 31557600;
+  assert.ok(Math.abs(p.expectedTotalYield - (3 + 103 * 0.14 * yearsLeft)) < 1e-6);
+  // Never below what the position has already earned.
+  assert.ok(p.expectedTotalYield > p.realizedYield);
+  assert.equal(p.assumptions.expectedYieldBasis, 'earned-to-date + apy x time-to-lock-end');
+});
+
+test('after lock end there is no time left to project — expected == earned', () => {
+  const now = Math.floor(Date.parse('2026-11-01T00:00:00+08:00') / 1000);
+  const p = computePosition({ entry, sharesHuman: '100', nav: 1.03, apy: 0.14, actionPeriod: ap, now });
+  assert.ok(Math.abs(p.expectedTotalYield - p.realizedYield) < 1e-9);
+});
+
+test('no NAV → projection falls back to principal, still reported', () => {
+  const now = Math.floor(Date.parse('2026-07-27T00:00:00+08:00') / 1000);
+  const p = computePosition({ entry, sharesHuman: '100', nav: null, apy: 0.14, actionPeriod: ap, now });
+  const yearsLeft = (Date.parse('2026-10-20T23:59:59+08:00') - Date.parse('2026-07-27T00:00:00+08:00')) / 1000 / 31557600;
+  assert.ok(Math.abs(p.expectedTotalYield - 100 * 0.14 * yearsLeft) < 1e-6);
+});
+
 test('null nav → null value/yield but principal still set', () => {
   const p = computePosition({ entry, sharesHuman: '50', nav: null, apy: null, actionPeriod: ap, now: Math.floor(Date.parse('2026-07-27T00:00:00+08:00')/1000) });
   assert.equal(p.currentValue, null);

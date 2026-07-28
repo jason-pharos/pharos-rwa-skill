@@ -4,6 +4,8 @@ import { fetchHarbor } from './sources/harbor.ts';
 import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getVaultNavOnchain } from './sources/chain.ts';
 import { resolveActionPeriod } from './logic/actionPeriod.ts';
 import { computePosition } from './logic/position.ts';
+import { computePAlphaPosition } from './logic/position-palpha.ts';
+import { fetchEmberPositionValue } from './sources/ember.ts';
 import { buildReminders, type Reminder } from './logic/reminders.ts';
 import { buildAdvice } from './logic/advise.ts';
 import { checkForUpdate } from './update/checkVersion.ts';
@@ -77,7 +79,23 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
       if (shares.totalRaw === 0n) return; // no position on any chain
       const { nav, apy, navResolvedFrom } = await navFor(entry, provider);
       const actionPeriod = resolveActionPeriod(entry, now);
-      positions.push(computePosition({ entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now, navResolvedFrom }));
+      const common = { entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now, navResolvedFrom };
+
+      // Vaults tracked by the Ember accounts API (pALPHA) get their value and
+      // yield split from there; every other vault uses shares × NAV. An API
+      // failure is surfaced but degrades to the on-chain computation.
+      if (entry.emberVaultId) {
+        try {
+          const emberPosition = await fetchEmberPositionValue(address, entry.emberVaultId);
+          if (emberPosition) {
+            positions.push(computePAlphaPosition({ ...common, emberPosition }));
+            return;
+          }
+        } catch (e) {
+          errors.push({ scope: `${entry.id}:ember`, error: String((e as Error).message ?? e) });
+        }
+      }
+      positions.push(computePosition(common));
     } catch (e) {
       errors.push({ scope: entry.id, error: String((e as Error).message ?? e) });
     }

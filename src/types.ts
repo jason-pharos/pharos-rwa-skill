@@ -29,6 +29,13 @@ export interface VaultRegistryEntry {
   id: VaultId;
   displayName: string;
   chainId: number;
+  /**
+   * Ember vault UUID. Only vaults tracked by the Ember accounts API have one
+   * (pALPHA). When set, position value/yield come from that API (see
+   * sources/ember.ts + logic/position-palpha.ts) with the generic on-chain
+   * shares × NAV computation as fallback.
+   */
+  emberVaultId?: string;
   shareToken: string;          // ERC20 whose balanceOf = user shares (primary/Pharos)
   balanceSources: BalanceSource[]; // all chains to sum shares from
   onchainNav: OnchainNav;      // NAV is always read on-chain via convertToAssets
@@ -58,6 +65,18 @@ export interface ActionPeriod {
   stale: boolean;              // true if config window fully in the past
 }
 
+/**
+ * Yield split reported by the Ember accounts API (USD).
+ *  - realized:   yield already crystallised (withdrawn/settled)
+ *  - unrealized: yield still sitting in the position
+ *  - total:      realized + unrealized == Position.realizedYield
+ */
+export interface YieldBreakdown {
+  realized: number;
+  unrealized: number;
+  total: number;
+}
+
 export interface Position {
   vault: VaultId;
   shares: string;              // human-readable decimal string
@@ -66,7 +85,10 @@ export interface Position {
   estimated: boolean;
   assumptions: Record<string, string | number>;
   principal: number | null;
+  /** Yield earned so far = currentValue − principal (== yieldBreakdown.total). */
   realizedYield: number | null;
+  /** Only present when the value came from the Ember accounts API (pALPHA). */
+  yieldBreakdown?: YieldBreakdown;
   depositedDurationDays: number | null;
   lockEnd: string | null;
   expectedTotalYield: number | null;

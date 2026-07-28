@@ -10,6 +10,6 @@
     "test": "tsx --test test/**/*.test.js",
     "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node18 --outfile=cli.js --banner:js=$'#!/usr/bin/env node\\nimport { createRequire as __cr } from \\'node:module\\'; const require = __cr(import.meta.url);' --define:__VERSION__=\"\\\"$npm_package_version\\\"\" --define:__OWNER__='\"jason-pharos\"' --define:__REPO__='\"pharos-rwa-skill\"' && chmod +x cli.js"
   },
-  "dependencies": { "ethers": "^6", "commander": "^12" },
+  "dependencies": { "ethers": "^6", "commander": "^12", "@ember-finance/sdk": "^1.4.6" },
   "devDependencies": { "typescript": "^5", "@types/node": "^20", "tsx": "^4", "esbuild": "^0.24" }
 }
