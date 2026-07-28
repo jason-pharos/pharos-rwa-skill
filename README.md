@@ -1,39 +1,108 @@
 # pharos-rwa-skill
 
 Zero-dependency Node CLI skill for managing Pharos RWA vault positions (APC3M, pALPHA).
+Portable across AI agents — `SKILL.md` + `cli.js`, no runtime deps, read-only.
 
-## Install as a Claude Code skill / 安装
+## Install / 安装
 
-Requires Node.js >= 18. No `npm install` needed — `cli.js` is a committed, dependency-free bundle.
+This skill is agent-agnostic: it is a `SKILL.md` instruction file plus a single
+zero-dependency `cli.js`. Any AI agent that can read a markdown file and run a
+shell command can use it — Claude Code, OpenClaw, Hermes agents, Cursor,
+OpenAI/Codex-style agents, LangChain/LlamaIndex tools, or your own harness.
 
-Personal skill (available in every project):
+Requirements: Node.js >= 18. No `npm install` — `cli.js` is a committed bundle.
 
-```bash
-git clone git@github.com:jason-pharos/pharos-rwa-skill.git ~/.claude/skills/pharos-rwa-manager
-```
+### Quick install (recommended)
 
-Project skill (shared with the repo, available only in that project):
-
-```bash
-cd /path/to/your/project
-git clone git@github.com:jason-pharos/pharos-rwa-skill.git .claude/skills/pharos-rwa-manager
-```
-
-The directory must contain `SKILL.md` at its top level — that's what Claude Code loads. Restart Claude Code (or start a new session) and the `pharos-rwa-manager` skill will be listed; invoke it with `/pharos-rwa-manager`, or just ask about your Pharos / RWA position and it triggers automatically.
-
-Verify the install:
+Use [`npx skills`](https://github.com/vercel-labs/skills), the open agent-skills
+installer. It supports Claude Code, OpenCode, Codex, Cursor and ~30 other agents,
+and installs the whole skill directory (`SKILL.md` + `cli.js`), not just the
+markdown:
 
 ```bash
-node ~/.claude/skills/pharos-rwa-manager/cli.js vaults --pretty
+npx skills add jason-pharos/pharos-rwa-skill
 ```
 
-Update to the latest version:
+It auto-detects the agents you have installed. Useful variants:
 
 ```bash
-cd ~/.claude/skills/pharos-rwa-manager && git pull
+npx skills add jason-pharos/pharos-rwa-skill --list        # show what's in the repo
+npx skills add jason-pharos/pharos-rwa-skill -g            # install for all projects
+npx skills add jason-pharos/pharos-rwa-skill -a claude-code -a opencode
+npx skills add jason-pharos/pharos-rwa-skill -y            # non-interactive / CI
+npx skills update                                          # update installed skills
 ```
 
-`node cli.js upgrade` also self-updates `cli.js` from the newest GitHub Release.
+The skill lands in your agent's skills directory (e.g.
+`.claude/skills/pharos-rwa-manager/` or `.agents/skills/…`) with `cli.js` next to
+`SKILL.md`, so it is runnable immediately.
+
+### Manual install
+
+If your agent isn't covered by `npx skills`, just clone the repo — the skill is a
+plain directory:
+
+```bash
+git clone https://github.com/jason-pharos/pharos-rwa-skill.git
+```
+
+Clone it anywhere the agent can reach. If your agent has a conventional skills
+directory, clone straight into it, e.g.:
+
+| Agent | Skills directory |
+|---|---|
+| Claude Code (personal) | `~/.claude/skills/pharos-rwa-manager` |
+| Claude Code (project) | `<repo>/.claude/skills/pharos-rwa-manager` |
+| OpenClaw / Hermes-style agents | whatever directory your agent scans for skills (often `~/.<agent>/skills/` or a `skills/` folder in the agent's workdir) |
+| Anything else | any path; point the agent at it explicitly (see below) |
+
+The directory must keep `SKILL.md` at its top level — that file is the contract:
+its front matter holds the name, description, and trigger conditions, and its
+body documents every command and output field.
+
+### Wiring it into an agent
+
+Auto-discovery covers most agents (and `npx skills` wires it up for you). For
+anything else, pick whichever fits your harness:
+
+- **Skill-directory convention** — agents that auto-discover skills (Claude Code
+  and similar) pick it up after a restart / new session. Invoke by name, e.g.
+  `/pharos-rwa-manager`, or just ask about your Pharos / RWA position and the
+  description in `SKILL.md` triggers it.
+- **Load `SKILL.md` into the system prompt** — for agents without a skills
+  mechanism, concatenate `SKILL.md` into the system prompt or context and let the
+  model shell out to `cli.js`. This is the lowest-common-denominator path and
+  works everywhere.
+- **Wrap the CLI as a tool** — register each subcommand
+  (`vaults`, `position`, `reminders`, `advise`) as a function/tool that runs
+  `node /path/to/cli.js <subcommand> [address]` and returns stdout. Output is a
+  single JSON object, so it drops straight into a tool result. Use `SKILL.md` as
+  the tool description.
+- **MCP / plugin hosts** — expose the same `node cli.js …` invocation as a tool
+  in your MCP server; no wrapper logic needed beyond passing arguments through.
+
+Contract for any integration: stdout is one JSON object, stderr is one-line JSON
+on error, exit code is non-zero on failure. It is read-only — no keys, no signing,
+no writes — so it is safe to run unattended.
+
+### Verify
+
+```bash
+node /path/to/pharos-rwa-skill/cli.js vaults --pretty
+```
+
+### Update
+
+```bash
+npx skills update                                   # if installed via npx skills
+cd /path/to/pharos-rwa-skill && git pull            # if cloned manually
+```
+
+Or let the CLI self-update `cli.js` from the newest GitHub Release:
+
+```bash
+node cli.js upgrade
+```
 
 ## Run (end users / agents — no install)
 
