@@ -28,11 +28,6 @@ npm run build           # esbuild → cli.js (commit this)
 
 After editing `src/`, always `npm run build` and commit `cli.js`. CI check: `npm run build && git diff --exit-code cli.js`.
 
-## Updating action-period dates each epoch
-
-APC3M has no public API for its withdraw window; dates live in `config/vaults.json`. Each new epoch (~3 months):
-1. Edit `config/vaults.json` → `APC3M.actionPeriodConfig` with the new lock/action/withdrawable dates.
-2. Commit to `main`. Users pick it up automatically within the 6h cache TTL — no reinstall.
 
 ## Cutting a release (code updates)
 
