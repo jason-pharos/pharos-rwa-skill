@@ -1,5 +1,4 @@
 import type { ActionPeriod, VaultRegistryEntry } from '../types.ts';
-import type { VaultInfo } from '../sources/vaultInfo.ts';
 import { isoToSec, secToIso, windowState } from '../util/time.ts';
 
 function build(startTs: number | null, endTs: number | null, withdrawableTs: number | null, source: ActionPeriod['source'], now: number): ActionPeriod {
@@ -20,20 +19,14 @@ function build(startTs: number | null, endTs: number | null, withdrawableTs: num
   };
 }
 
-function pickPhase(phases: VaultInfo['phases'], now: number): { startTs: number; endTs: number } | null {
-  if (phases.length === 0) return null;
-  const containing = phases.find((p) => now >= p.startTs && now <= p.endTs);
-  if (containing) return containing;
-  return [...phases].sort((a, b) => b.endTs - a.endTs)[0] ?? null;
-}
-
-export function resolveActionPeriod(entry: VaultRegistryEntry, apiInfo: VaultInfo | null, now: number): ActionPeriod {
-  // Only pALPHA has a vault-info API (entry.vaultInfoApiId); its phases drive
-  // the action period. Everything else uses the configured window.
-  if (entry.vaultInfoApiId && apiInfo) {
-    const phase = pickPhase(apiInfo.phases, now);
-    if (phase) return build(phase.startTs, phase.endTs, apiInfo.withdrawableTs, 'api', now);
-  }
+/**
+ * Action period (the withdraw window) comes from the per-epoch configured
+ * dates for BOTH vaults. The pALPHA vault-info API's `phases` are APY accrual
+ * periods, NOT withdraw windows, and are not kept up to date — so they must
+ * NOT drive the action period. These config dates are maintained per epoch
+ * (see config/vaults.json / the registry).
+ */
+export function resolveActionPeriod(entry: VaultRegistryEntry, now: number): ActionPeriod {
   const cfg = entry.actionPeriodConfig;
   const startTs = isoToSec(cfg.actionStart);
   const endTs = isoToSec(cfg.actionEnd);

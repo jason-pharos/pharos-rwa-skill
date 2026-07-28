@@ -20777,17 +20777,7 @@ function build(startTs, endTs, withdrawableTs, source, now) {
     stale: st.stale
   };
 }
-function pickPhase(phases, now) {
-  if (phases.length === 0) return null;
-  const containing = phases.find((p) => now >= p.startTs && now <= p.endTs);
-  if (containing) return containing;
-  return [...phases].sort((a, b2) => b2.endTs - a.endTs)[0] ?? null;
-}
-function resolveActionPeriod(entry, apiInfo, now) {
-  if (entry.vaultInfoApiId && apiInfo) {
-    const phase = pickPhase(apiInfo.phases, now);
-    if (phase) return build(phase.startTs, phase.endTs, apiInfo.withdrawableTs, "api", now);
-  }
+function resolveActionPeriod(entry, now) {
   const cfg = entry.actionPeriodConfig;
   const startTs = isoToSec(cfg.actionStart);
   const endTs = isoToSec(cfg.actionEnd);
@@ -20968,15 +20958,16 @@ async function navFor(entry, provider) {
     nav = null;
   }
   if (!entry.vaultInfoApiId) {
-    return { nav, apy: entry.apyFallback, apiInfo: null, navResolvedFrom };
+    return { nav, apy: entry.apyFallback, navResolvedFrom };
   }
-  let apiInfo = null;
+  let apy = entry.apyFallback;
   try {
-    apiInfo = await fetchVaultInfo(entry.vaultInfoApiId);
+    const apiInfo = await fetchVaultInfo(entry.vaultInfoApiId);
+    apy = apiInfo.apy ?? entry.apyFallback;
   } catch {
-    apiInfo = null;
+    apy = entry.apyFallback;
   }
-  return { nav, apy: apiInfo?.apy ?? entry.apyFallback, apiInfo, navResolvedFrom };
+  return { nav, apy, navResolvedFrom };
 }
 async function buildPositions(address, opts, errors) {
   const registry = await loadRegistry({ noRemote: opts.noRemote });
@@ -20991,8 +20982,8 @@ async function buildPositions(address, opts, errors) {
         errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
       }
       if (shares.totalRaw === 0n) return;
-      const { nav, apy, apiInfo, navResolvedFrom } = await navFor(entry, provider);
-      const actionPeriod = resolveActionPeriod(entry, apiInfo, now);
+      const { nav, apy, navResolvedFrom } = await navFor(entry, provider);
+      const actionPeriod = resolveActionPeriod(entry, now);
       positions.push(computePosition({ entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now, navResolvedFrom }));
     } catch (e) {
       errors.push({ scope: entry.id, error: String(e.message ?? e) });

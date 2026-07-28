@@ -50,7 +50,7 @@ export interface VaultRegistryEntry {
   };
 }
 
-export type ActionPeriodSource = 'api' | 'config' | 'unavailable';
+export type ActionPeriodSource = 'config' | 'unavailable';
 
 export interface ActionPeriod {
   start: string | null;        // ISO8601
