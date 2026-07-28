@@ -10,10 +10,10 @@ const apc = {
     withdrawable: '2026-10-20',
   },
 };
-// pALPHA also uses config for action period; the vault-info API's phases are
-// APY accrual periods (NOT withdraw windows) and must not drive it.
+// pALPHA uses config for action period, same as APC3M (the vault-info API is
+// no longer used at all).
 const pa = {
-  id: 'pALPHA', vaultInfoApiId: '1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f',
+  id: 'pALPHA',
   actionPeriodConfig: {
     lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-01T00:00:00+08:00',
     actionStart: '2026-09-17T11:00:00+08:00', actionEnd: '2026-10-01T00:00:00+08:00',

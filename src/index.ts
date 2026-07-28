@@ -1,7 +1,6 @@
 import type { AdviceBundle, Envelope, Position, UpdateInfo, VaultMarket, VaultRegistryEntry } from './types.ts';
 import { loadRegistry } from './config/remoteConfig.ts';
 import { fetchHarbor } from './sources/harbor.ts';
-import { fetchVaultInfo } from './sources/vaultInfo.ts';
 import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getVaultNavOnchain } from './sources/chain.ts';
 import { resolveActionPeriod } from './logic/actionPeriod.ts';
 import { computePosition } from './logic/position.ts';
@@ -34,41 +33,28 @@ export async function runVaults(opts: RunOpts): Promise<Envelope<{ vaults: Vault
   return makeEnvelope({ vaults }, errors, await safeUpdate(opts));
 }
 
-type NavResult = { nav: number | null; apy: number | null; navResolvedFrom: 'onchain' | 'none' };
+type NavResult = { nav: number | null; apy: number; navResolvedFrom: 'onchain' | 'none' };
 
 /**
- * Resolve NAV + APY for one vault. Data-driven (no per-vault-id branching):
+ * Resolve NAV + APY for one vault.
  *  - NAV is ALWAYS read on-chain (ERC4626 convertToAssets via entry.onchainNav).
  *    A read failure degrades to nav:null (position still shows shares/principal)
  *    rather than dropping the whole position.
- *  - If (and only if) the vault declares a vaultInfoApiId, its pALPHA-specific
- *    vault-info API is fetched for APY only (NOT NAV, NOT action period — the
- *    API's `phases` are APY accrual periods, not withdraw windows). API failure
- *    → apy falls back to the registry default.
+ *  - APY comes from the registry (entry.apyFallback), maintained per epoch via
+ *    remote config. The vault-info API is no longer used here — its data is
+ *    mostly unmaintained, and everything position needs is on-chain or in the
+ *    registry.
  * Action period comes solely from actionPeriodConfig (see resolveActionPeriod).
  */
 async function navFor(entry: VaultRegistryEntry, provider: ReturnType<typeof makeProvider>): Promise<NavResult> {
   const { vault, shareDecimals, assetDecimals } = entry.onchainNav;
-  let nav: number | null = null;
-  let navResolvedFrom: NavResult['navResolvedFrom'] = 'none';
   try {
-    nav = await getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
-    navResolvedFrom = 'onchain';
+    const nav = await getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
+    return { nav, apy: entry.apyFallback, navResolvedFrom: 'onchain' };
   } catch {
-    nav = null; // degrade gracefully; principal/shares still reported
+    // NAV read failed → degrade gracefully; principal/shares still reported.
+    return { nav: null, apy: entry.apyFallback, navResolvedFrom: 'none' };
   }
-
-  if (!entry.vaultInfoApiId) {
-    return { nav, apy: entry.apyFallback, navResolvedFrom };
-  }
-  let apy: number | null = entry.apyFallback;
-  try {
-    const apiInfo = await fetchVaultInfo(entry.vaultInfoApiId);
-    apy = apiInfo.apy ?? entry.apyFallback;
-  } catch {
-    apy = entry.apyFallback; // APY falls back
-  }
-  return { nav, apy, navResolvedFrom };
 }
 
 async function buildPositions(address: string, opts: RunOpts, errors: Envelope<unknown>['errors']): Promise<Position[]> {

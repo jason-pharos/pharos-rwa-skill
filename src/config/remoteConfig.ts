@@ -19,7 +19,7 @@ export function mergeRegistry(base: VaultRegistryEntry[], override: unknown): Va
     const patch = o.vaults.find((v) => v && v.id === entry.id);
     if (!patch) return entry;
     // Only allow specific fields to be overridden from remote config.
-    // Identity/address fields (id, displayName, chainId, shareToken, balanceSources, onchainNav, vaultInfoApiId)
+    // Identity/address fields (id, displayName, chainId, shareToken, balanceSources, onchainNav)
     // are always taken from the base and protected from override.
     return {
       ...entry,

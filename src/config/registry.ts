@@ -59,8 +59,6 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
       shareDecimals: 6,
       assetDecimals: 6,
     },
-    // pALPHA-specific Ember/Bluefin vault-info API: APY + action period only (NOT NAV).
-    vaultInfoApiId: '1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f',
     entryNavBaseline: 1.0,
     apyFallback: 0.14,
     actionPeriodConfig: {

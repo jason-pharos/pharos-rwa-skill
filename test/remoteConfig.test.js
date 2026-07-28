@@ -29,7 +29,6 @@ test('identity/address fields protected from remote override', () => {
         shareToken: '0xATTACKER0000000000000000000000000000001111',
         onchainNav: { vault: '0xATTACKER0000000000000000000000000000002222', shareDecimals: 0, assetDecimals: 0 },
         chainId: 999,
-        vaultInfoApiId: 'hacked-id',
         displayName: 'HACKED',
         apyFallback: 0.5,
       },
@@ -41,7 +40,6 @@ test('identity/address fields protected from remote override', () => {
   assert.equal(apc.onchainNav.vault, '0xD0428799FbC35557834d33121BA4472692c8908a');
   assert.equal(apc.onchainNav.assetDecimals, 6);
   assert.equal(apc.chainId, 1672);
-  assert.equal(apc.vaultInfoApiId, undefined); // APC3M has no vault-info API; not injectable
   assert.equal(apc.displayName, 'AxilPrimeCredit-3M');
   // Only policy/value fields can be overridden
   assert.equal(apc.apyFallback, 0.5);

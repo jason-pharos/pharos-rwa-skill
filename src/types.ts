@@ -32,16 +32,9 @@ export interface VaultRegistryEntry {
   shareToken: string;          // ERC20 whose balanceOf = user shares (primary/Pharos)
   balanceSources: BalanceSource[]; // all chains to sum shares from
   onchainNav: OnchainNav;      // NAV is always read on-chain via convertToAssets
-  /**
-   * pALPHA ONLY: the Ember/Bluefin vault-info API id. This API is
-   * pALPHA-specific (not a general mechanism) and is used to fetch APY and
-   * the action-period phases/withdrawable timestamp — NOT NAV. When absent
-   * (APC3M), APY and action period come from apyFallback / actionPeriodConfig.
-   */
-  vaultInfoApiId?: string;
   entryNavBaseline: number;    // epoch-NAV approximation entry price
-  apyFallback: number;         // decimal, e.g. 0.14
-  actionPeriodConfig: {        // fallback (pALPHA) / sole source (APC3M)
+  apyFallback: number;         // decimal, e.g. 0.14 — APY (registry-maintained, per epoch)
+  actionPeriodConfig: {        // action period (withdraw window) — config for every vault
     lockStart: string;         // ISO8601 with tz
     lockEnd: string;
     actionStart: string;

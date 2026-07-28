@@ -3111,8 +3111,6 @@ var DEFAULT_REGISTRY = [
       shareDecimals: 6,
       assetDecimals: 6
     },
-    // pALPHA-specific Ember/Bluefin vault-info API: APY + action period only (NOT NAV).
-    vaultInfoApiId: "1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f",
     entryNavBaseline: 1,
     apyFallback: 0.14,
     actionPeriodConfig: {
@@ -3247,36 +3245,6 @@ async function fetchHarbor() {
     topPick: Boolean(r.topPick),
     icon: r.icon ?? ""
   }));
-}
-
-// src/sources/vaultInfo.ts
-function num(v) {
-  if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  if (typeof v === "string" && v.trim() !== "") {
-    const n2 = Number(v);
-    return Number.isFinite(n2) ? n2 : null;
-  }
-  return null;
-}
-function extractVaultInfo(data) {
-  const d = data ?? {};
-  const ov = d.overview ?? {};
-  const vi = d.vaultInfo ?? {};
-  const rawPhases = Array.isArray(ov.phases) ? ov.phases : [];
-  return {
-    apy: num(ov.totalApy),
-    nav: num(vi.receiptTokenPrice),
-    withdrawableTs: num(ov.withdrawableTimestamp),
-    minWithdrawalShares: num(ov.minWithdrawalShares),
-    phases: rawPhases.map((p) => ({ startTs: num(p?.startTimestamp), endTs: num(p?.endTimestamp), apy: num(p?.apy) })).filter((p) => p.startTs !== null && p.endTs !== null)
-  };
-}
-function apiBase2() {
-  return process.env.PHAROS_API_BASE ?? "https://api.pharosnetwork.xyz";
-}
-async function fetchVaultInfo(vaultId) {
-  const resp = await fetchJson(`${apiBase2()}/omni_port/vault/info?vaultId=${vaultId}`);
-  return extractVaultInfo(resp.data);
 }
 
 // node_modules/ethers/lib.esm/_version.js
@@ -6090,8 +6058,8 @@ function bytesToHex(bytes2) {
   }
   return hex;
 }
-function numberToHexUnpadded(num2) {
-  const hex = num2.toString(16);
+function numberToHexUnpadded(num) {
+  const hex = num.toString(16);
   return hex.length & 1 ? `0${hex}` : hex;
 }
 function hexToNumber(hex) {
@@ -6282,7 +6250,7 @@ function mod(a, b2) {
   const result = a % b2;
   return result >= _0n3 ? result : b2 + result;
 }
-function pow(num2, power, modulo) {
+function pow(num, power, modulo) {
   if (modulo <= _0n3 || power < _0n3)
     throw new Error("Expected power/modulo > 0");
   if (modulo === _1n3)
@@ -6290,8 +6258,8 @@ function pow(num2, power, modulo) {
   let res = _1n3;
   while (power > _0n3) {
     if (power & _1n3)
-      res = res * num2 % modulo;
-    num2 = num2 * num2 % modulo;
+      res = res * num % modulo;
+    num = num * num % modulo;
     power >>= _1n3;
   }
   return res;
@@ -6424,15 +6392,15 @@ function validateField(field) {
   }, initial);
   return validateObject(field, opts);
 }
-function FpPow(f, num2, power) {
+function FpPow(f, num, power) {
   if (power < _0n3)
     throw new Error("Expected power > 0");
   if (power === _0n3)
     return f.ONE;
   if (power === _1n3)
-    return num2;
+    return num;
   let p = f.ONE;
-  let d = num2;
+  let d = num;
   while (power > _0n3) {
     if (power & _1n3)
       p = f.mul(p, d);
@@ -6443,18 +6411,18 @@ function FpPow(f, num2, power) {
 }
 function FpInvertBatch(f, nums) {
   const tmp = new Array(nums.length);
-  const lastMultiplied = nums.reduce((acc, num2, i) => {
-    if (f.is0(num2))
+  const lastMultiplied = nums.reduce((acc, num, i) => {
+    if (f.is0(num))
       return acc;
     tmp[i] = acc;
-    return f.mul(acc, num2);
+    return f.mul(acc, num);
   }, f.ONE);
   const inverted = f.inv(lastMultiplied);
-  nums.reduceRight((acc, num2, i) => {
-    if (f.is0(num2))
+  nums.reduceRight((acc, num, i) => {
+    if (f.is0(num))
       return acc;
     tmp[i] = f.mul(acc, tmp[i]);
-    return f.mul(acc, num2);
+    return f.mul(acc, num);
   }, inverted);
   return tmp;
 }
@@ -6477,34 +6445,34 @@ function Field(ORDER, bitLen2, isLE2 = false, redef = {}) {
     MASK: bitMask(BITS),
     ZERO: _0n3,
     ONE: _1n3,
-    create: (num2) => mod(num2, ORDER),
-    isValid: (num2) => {
-      if (typeof num2 !== "bigint")
-        throw new Error(`Invalid field element: expected bigint, got ${typeof num2}`);
-      return _0n3 <= num2 && num2 < ORDER;
+    create: (num) => mod(num, ORDER),
+    isValid: (num) => {
+      if (typeof num !== "bigint")
+        throw new Error(`Invalid field element: expected bigint, got ${typeof num}`);
+      return _0n3 <= num && num < ORDER;
     },
-    is0: (num2) => num2 === _0n3,
-    isOdd: (num2) => (num2 & _1n3) === _1n3,
-    neg: (num2) => mod(-num2, ORDER),
+    is0: (num) => num === _0n3,
+    isOdd: (num) => (num & _1n3) === _1n3,
+    neg: (num) => mod(-num, ORDER),
     eql: (lhs, rhs) => lhs === rhs,
-    sqr: (num2) => mod(num2 * num2, ORDER),
+    sqr: (num) => mod(num * num, ORDER),
     add: (lhs, rhs) => mod(lhs + rhs, ORDER),
     sub: (lhs, rhs) => mod(lhs - rhs, ORDER),
     mul: (lhs, rhs) => mod(lhs * rhs, ORDER),
-    pow: (num2, power) => FpPow(f, num2, power),
+    pow: (num, power) => FpPow(f, num, power),
     div: (lhs, rhs) => mod(lhs * invert(rhs, ORDER), ORDER),
     // Same as above, but doesn't normalize
-    sqrN: (num2) => num2 * num2,
+    sqrN: (num) => num * num,
     addN: (lhs, rhs) => lhs + rhs,
     subN: (lhs, rhs) => lhs - rhs,
     mulN: (lhs, rhs) => lhs * rhs,
-    inv: (num2) => invert(num2, ORDER),
+    inv: (num) => invert(num, ORDER),
     sqrt: redef.sqrt || ((n2) => sqrtP(f, n2)),
     invertBatch: (lst) => FpInvertBatch(f, lst),
     // TODO: do we really need constant cmov?
     // We don't have const-time bigints anyway, so probably will be not very useful
     cmov: (a, b2, c) => c ? b2 : a,
-    toBytes: (num2) => isLE2 ? numberToBytesLE(num2, BYTES) : numberToBytesBE(num2, BYTES),
+    toBytes: (num) => isLE2 ? numberToBytesLE(num, BYTES) : numberToBytesBE(num, BYTES),
     fromBytes: (bytes2) => {
       if (bytes2.length !== BYTES)
         throw new Error(`Fp.fromBytes: expected ${BYTES}, got ${bytes2.length}`);
@@ -6529,8 +6497,8 @@ function mapHashToField(key, fieldOrder, isLE2 = false) {
   const minLen = getMinHashLength(fieldOrder);
   if (len < 16 || len < minLen || len > 1024)
     throw new Error(`expected ${minLen}-1024 bytes of input, got ${len}`);
-  const num2 = isLE2 ? bytesToNumberBE(key) : bytesToNumberLE(key);
-  const reduced = mod(num2, fieldOrder - _1n3) + _1n3;
+  const num = isLE2 ? bytesToNumberBE(key) : bytesToNumberLE(key);
+  const reduced = mod(num, fieldOrder - _1n3) + _1n3;
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
@@ -6718,8 +6686,8 @@ var DER = {
   },
   hexFromSig(sig) {
     const slice = (s2) => Number.parseInt(s2[0], 16) & 8 ? "00" + s2 : s2;
-    const h = (num2) => {
-      const hex = num2.toString(16);
+    const h = (num) => {
+      const hex = num.toString(16);
       return hex.length & 1 ? `0${hex}` : hex;
     };
     const s = slice(h(sig.s));
@@ -6757,11 +6725,11 @@ function weierstrassPoints(opts) {
   }
   if (!Fp2.eql(Fp2.sqr(CURVE.Gy), weierstrassEquation(CURVE.Gx)))
     throw new Error("bad generator point: equation left != right");
-  function isWithinCurveOrder(num2) {
-    return typeof num2 === "bigint" && _0n5 < num2 && num2 < CURVE.n;
+  function isWithinCurveOrder(num) {
+    return typeof num === "bigint" && _0n5 < num && num < CURVE.n;
   }
-  function assertGE(num2) {
-    if (!isWithinCurveOrder(num2))
+  function assertGE(num) {
+    if (!isWithinCurveOrder(num))
       throw new Error("Expected valid bigint: 0 < bigint < curve.n");
   }
   function normPrivateKeyToScalar(key) {
@@ -6773,16 +6741,16 @@ function weierstrassPoints(opts) {
         throw new Error("Invalid key");
       key = key.padStart(nByteLength * 2, "0");
     }
-    let num2;
+    let num;
     try {
-      num2 = typeof key === "bigint" ? key : bytesToNumberBE(ensureBytes("private key", key, nByteLength));
+      num = typeof key === "bigint" ? key : bytesToNumberBE(ensureBytes("private key", key, nByteLength));
     } catch (error) {
       throw new Error(`private key must be ${nByteLength} bytes, hex or bigint, not ${typeof key}`);
     }
     if (wrapPrivateKey)
-      num2 = mod(num2, n2);
-    assertGE(num2);
-    return num2;
+      num = mod(num, n2);
+    assertGE(num);
+    return num;
   }
   const pointPrecomputes = /* @__PURE__ */ new Map();
   function assertPrjPoint(other) {
@@ -7143,8 +7111,8 @@ function weierstrass(curveDef) {
   const { Fp: Fp2, n: CURVE_ORDER } = CURVE;
   const compressedLen = Fp2.BYTES + 1;
   const uncompressedLen = 2 * Fp2.BYTES + 1;
-  function isValidFieldElement(num2) {
-    return _0n5 < num2 && num2 < Fp2.ORDER;
+  function isValidFieldElement(num) {
+    return _0n5 < num && num < Fp2.ORDER;
   }
   function modN(a) {
     return mod(a, CURVE_ORDER);
@@ -7188,7 +7156,7 @@ function weierstrass(curveDef) {
       }
     }
   });
-  const numToNByteStr = (num2) => bytesToHex(numberToBytesBE(num2, CURVE.nByteLength));
+  const numToNByteStr = (num) => bytesToHex(numberToBytesBE(num, CURVE.nByteLength));
   function isBiggerThanHalfOrder(number2) {
     const HALF = CURVE_ORDER >> _1n5;
     return number2 > HALF;
@@ -7322,20 +7290,20 @@ function weierstrass(curveDef) {
     return b2.multiply(normPrivateKeyToScalar(privateA)).toRawBytes(isCompressed);
   }
   const bits2int = CURVE.bits2int || function(bytes2) {
-    const num2 = bytesToNumberBE(bytes2);
+    const num = bytesToNumberBE(bytes2);
     const delta = bytes2.length * 8 - CURVE.nBitLength;
-    return delta > 0 ? num2 >> BigInt(delta) : num2;
+    return delta > 0 ? num >> BigInt(delta) : num;
   };
   const bits2int_modN = CURVE.bits2int_modN || function(bytes2) {
     return modN(bits2int(bytes2));
   };
   const ORDER_MASK = bitMask(CURVE.nBitLength);
-  function int2octets(num2) {
-    if (typeof num2 !== "bigint")
+  function int2octets(num) {
+    if (typeof num !== "bigint")
       throw new Error("bigint expected");
-    if (!(_0n5 <= num2 && num2 < ORDER_MASK))
+    if (!(_0n5 <= num && num < ORDER_MASK))
       throw new Error(`bigint expected < 2^${CURVE.nBitLength}`);
-    return numberToBytesBE(num2, CURVE.nByteLength);
+    return numberToBytesBE(num, CURVE.nByteLength);
   }
   function prepSig(msgHash, privateKey, opts = defaultSigOpts) {
     if (["recovered", "canonical"].some((k) => k in opts))
@@ -20949,25 +20917,12 @@ async function runVaults(opts) {
 }
 async function navFor(entry, provider) {
   const { vault, shareDecimals, assetDecimals } = entry.onchainNav;
-  let nav = null;
-  let navResolvedFrom = "none";
   try {
-    nav = await getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
-    navResolvedFrom = "onchain";
+    const nav = await getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
+    return { nav, apy: entry.apyFallback, navResolvedFrom: "onchain" };
   } catch {
-    nav = null;
+    return { nav: null, apy: entry.apyFallback, navResolvedFrom: "none" };
   }
-  if (!entry.vaultInfoApiId) {
-    return { nav, apy: entry.apyFallback, navResolvedFrom };
-  }
-  let apy = entry.apyFallback;
-  try {
-    const apiInfo = await fetchVaultInfo(entry.vaultInfoApiId);
-    apy = apiInfo.apy ?? entry.apyFallback;
-  } catch {
-    apy = entry.apyFallback;
-  }
-  return { nav, apy, navResolvedFrom };
 }
 async function buildPositions(address, opts, errors) {
   const registry = await loadRegistry({ noRemote: opts.noRemote });
