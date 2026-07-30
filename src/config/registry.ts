@@ -23,6 +23,7 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     },
     entryNavBaseline: 1.0,
     apyFallback: 0.14,
+    r25VaultId: 'APC3M',
     actionPeriodConfig: {
       lockStart: '2026-07-20T00:00:00+08:00',
       lockEnd: '2026-10-20T23:59:59+08:00',
@@ -113,6 +114,7 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     },
     entryNavBaseline: 1.0,
     apyFallback: 0.15,
+    r25VaultId: 'VRPCS',
     // no actionPeriodConfig — see redeemability above.
   },
   {
@@ -148,6 +150,7 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     },
     entryNavBaseline: 1.0,
     apyFallback: 0.08,
+    r25VaultId: 'VRPCW',
     // no actionPeriodConfig — see redeemability above.
   },
 ];

@@ -20912,6 +20912,7 @@ var DEFAULT_REGISTRY = [
     },
     entryNavBaseline: 1,
     apyFallback: 0.14,
+    r25VaultId: "APC3M",
     actionPeriodConfig: {
       lockStart: "2026-07-20T00:00:00+08:00",
       lockEnd: "2026-10-20T23:59:59+08:00",
@@ -21001,7 +21002,8 @@ var DEFAULT_REGISTRY = [
       async: true
     },
     entryNavBaseline: 1,
-    apyFallback: 0.15
+    apyFallback: 0.15,
+    r25VaultId: "VRPCS"
     // no actionPeriodConfig — see redeemability above.
   },
   {
@@ -21036,7 +21038,8 @@ var DEFAULT_REGISTRY = [
       async: false
     },
     entryNavBaseline: 1,
-    apyFallback: 0.08
+    apyFallback: 0.08,
+    r25VaultId: "VRPCW"
     // no actionPeriodConfig — see redeemability above.
   }
 ];
@@ -21166,6 +21169,49 @@ async function fetchHarbor() {
     topPick: Boolean(r.topPick),
     icon: r.icon ?? ""
   }));
+}
+
+// src/sources/r25.ts
+var R25_BASE = "https://app.r25.xyz/dapp";
+var MIN_INTERVAL_MS = 1200;
+var TIMEOUT_MS = 12e3;
+var lastRequestAt = 0;
+async function r25Post(path, body) {
+  const now = Date.now();
+  const wait2 = Math.max(0, lastRequestAt + MIN_INTERVAL_MS - now);
+  if (wait2 > 0) await new Promise((r) => setTimeout(r, wait2));
+  lastRequestAt = Date.now();
+  try {
+    const res = await fetch(`${R25_BASE}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-currency": "USD",
+        "x-language": "en-US",
+        "x-timestamp": String(Math.floor(Date.now() / 1e3)),
+        "x-timezone": "Asia/Hong_Kong"
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.success ? json.data : null;
+  } catch {
+    return null;
+  }
+}
+function fetchR25VaultList() {
+  return r25Post("/vault/list", {});
+}
+function fetchR25Holdings(address) {
+  return r25Post("/portfolio/holdings", { address });
+}
+function fetchR25VaultPeriod(vaultId) {
+  return r25Post("/vault/period", { vaultId });
+}
+function fetchR25Positions(address, vaultId) {
+  return r25Post("/portfolio/positions", { address, vaultId });
 }
 
 // node_modules/ethers/lib.esm/_version.js
@@ -38703,6 +38749,12 @@ function resolveActionPeriod(entry, now) {
   if (startTs !== null && endTs !== null) return build(startTs, endTs, wTs, "config", now);
   return build(null, null, null, "unavailable", now);
 }
+function resolveR25ActionPeriod(period, now) {
+  const startTs = period.withdrawalWindowStart != null ? Math.floor(period.withdrawalWindowStart / 1e3) : null;
+  const endTs = period.withdrawalWindowEnd != null ? Math.floor(period.withdrawalWindowEnd / 1e3) : null;
+  const maturityTs = period.nextMaturityDate != null ? Math.floor(period.nextMaturityDate / 1e3) : null;
+  return build(startTs, endTs, maturityTs, "r25-api", now);
+}
 function resolveRedeemableActionPeriod(raw, walletShares, nav, lockDays, isAsync) {
   const totalPosition = walletShares + raw.pendingRedeemShares + raw.claimableRedeemShares;
   const redeemable = {
@@ -38742,27 +38794,33 @@ function lockTiming(entry, now) {
   };
 }
 function computePosition(args) {
-  const { entry, sharesHuman, nav, apy, actionPeriod, now, navResolvedFrom } = args;
+  const { entry, sharesHuman, nav, apy, actionPeriod, now, navResolvedFrom, r25Holding } = args;
   const shares = Number(sharesHuman);
   const currentValue = nav != null ? shares * nav : null;
-  const principal = shares * entry.entryNavBaseline;
-  const realizedYield = currentValue != null ? currentValue - principal : null;
+  const hasRealEarnings = r25Holding != null && currentValue != null;
+  const realizedYield = hasRealEarnings ? r25Holding.earnings : currentValue != null ? currentValue - shares * entry.entryNavBaseline : null;
+  const principal = hasRealEarnings ? currentValue - r25Holding.earnings : shares * entry.entryNavBaseline;
   const { depositedDurationDays, remainingLockYears } = lockTiming(entry, now);
   const effectiveApy = apy ?? entry.apyFallback;
   const projectionBase = currentValue ?? principal;
   const expectedTotalYield = remainingLockYears != null ? (realizedYield ?? 0) + projectionBase * effectiveApy * remainingLockYears : null;
-  return {
+  const assumptions = {
+    navResolvedFrom: navResolvedFrom ?? "onchain",
+    // expectedTotalYield is cumulative-to-lock-end, not per-epoch.
+    expectedYieldBasis: "earned-to-date + apy x time-to-lock-end"
+  };
+  if (hasRealEarnings) {
+    assumptions.valueResolvedFrom = "r25-api";
+  } else {
+    assumptions.entryNav = entry.entryNavBaseline;
+  }
+  const position = {
     vault: entry.id,
     shares: sharesHuman,
     nav,
     currentValue,
-    estimated: true,
-    assumptions: {
-      entryNav: entry.entryNavBaseline,
-      navResolvedFrom: navResolvedFrom ?? "onchain",
-      // expectedTotalYield is cumulative-to-lock-end, not per-epoch.
-      expectedYieldBasis: "earned-to-date + apy x time-to-lock-end"
-    },
+    estimated: !hasRealEarnings,
+    assumptions,
     principal,
     realizedYield,
     depositedDurationDays,
@@ -38770,6 +38828,8 @@ function computePosition(args) {
     expectedTotalYield,
     actionPeriod
   };
+  if (r25Holding) position.r25 = r25Holding;
+  return position;
 }
 
 // src/logic/position-palpha.ts
@@ -38818,14 +38878,14 @@ function computePAlphaPosition(args) {
 
 // src/sources/ember.ts
 var import_v2 = __toESM(require_v2(), 1);
-var TIMEOUT_MS = 12e3;
+var TIMEOUT_MS2 = 12e3;
 function apiBase2() {
   return process.env.PHAROS_API_BASE ?? "https://api.pharosnetwork.xyz";
 }
 function accountsApi() {
   return new import_v2.AccountsApi(new import_v2.Configuration({
     basePath: `${apiBase2()}/omni_port/ember`,
-    baseOptions: { timeout: TIMEOUT_MS, headers: { accept: "application/json", ...PHAROS_HEADERS } }
+    baseOptions: { timeout: TIMEOUT_MS2, headers: { accept: "application/json", ...PHAROS_HEADERS } }
   }));
 }
 async function fetchEmberPositionValue(address, vaultId) {
@@ -38852,8 +38912,18 @@ function classify(ap) {
 function fmt(n2) {
   return n2.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
-function messageFor(vault, u, ap) {
+function trancheNote(tranches) {
+  if (!tranches || tranches.length === 0) return "";
+  const next = tranches[0];
+  if (tranches.length === 1) {
+    return ` Tranche of ${fmt(next.shares)} share(s) expires ${next.expirationDate} (${next.daysUntilExpiration}d).`;
+  }
+  const totalShares = tranches.reduce((s, t) => s + t.shares, 0);
+  return ` ${tranches.length} tranches totalling ${fmt(totalShares)} share(s); nearest expires ${next.expirationDate} (${next.daysUntilExpiration}d), latest ${tranches[tranches.length - 1].expirationDate}.`;
+}
+function messageFor(vault, u, ap, tranches) {
   const r = ap.redeemable;
+  const tn = trancheNote(tranches);
   switch (u) {
     case "closing-soon":
       return `${vault}: withdraw window closes in ${ap.closesInDays} day(s).`;
@@ -38866,13 +38936,13 @@ function messageFor(vault, u, ap) {
     case "closed":
       return `${vault}: last known withdraw window has passed; config may be stale.`;
     case "claimable":
-      return `${vault}: ${fmt(r?.claimableRedeemShares ?? 0)} share(s) have settled and can be claimed now.`;
+      return `${vault}: ${fmt(r?.claimableRedeemShares ?? 0)} share(s) have settled and can be claimed now.${tn}`;
     case "redeemable":
-      return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (${r?.lockDays ?? "?"}-day term, no fixed date on-chain).`;
+      return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (${r?.lockDays ?? "?"}-day term).${tn}`;
     case "pending":
-      return `${vault}: a withdraw request for ${fmt(r?.pendingRedeemShares ?? 0)} share(s) is submitted and awaiting settlement.`;
+      return `${vault}: a withdraw request for ${fmt(r?.pendingRedeemShares ?? 0)} share(s) is submitted and awaiting settlement.${tn}`;
     case "locked":
-      return `${vault}: nothing redeemable right now (locked). Funds unlock ~${r?.lockDays ?? "?"} days after deposit${r?.async ? "; submit a withdraw request ahead of maturity" : ""}.`;
+      return `${vault}: nothing redeemable right now (locked). Funds unlock ~${r?.lockDays ?? "?"} days after deposit${r?.async ? "; submit a withdraw request ahead of maturity" : ""}.${tn}`;
     default:
       return `${vault}: action period unavailable.`;
   }
@@ -38880,7 +38950,7 @@ function messageFor(vault, u, ap) {
 function buildReminders(positions) {
   return positions.map((p) => {
     const urgency = classify(p.actionPeriod);
-    return { vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod), actionPeriod: p.actionPeriod };
+    return { vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod, p.r25?.tranches), actionPeriod: p.actionPeriod };
   });
 }
 
@@ -38971,6 +39041,26 @@ async function safeUpdate(opts) {
 function providerFor(opts) {
   return makeProvider(opts.rpc ?? process.env.PHAROS_RPC_URL ?? DEFAULT_RPC, DEFAULT_CHAIN_ID);
 }
+async function enrichWithR25(vaults, opts) {
+  try {
+    const registry = await loadRegistry({ noRemote: opts.noRemote });
+    const r25List = await fetchR25VaultList();
+    if (!r25List) return;
+    const r25Map = new Map(r25List.map((v) => [v.vaultId, v]));
+    for (const entry of registry) {
+      if (!entry.r25VaultId) continue;
+      const r25 = r25Map.get(entry.r25VaultId);
+      if (!r25) continue;
+      const market = vaults.find((m) => m.name === entry.id || m.name === entry.r25VaultId);
+      if (market) {
+        market.tvl = Number(r25.tvl) || market.tvl;
+        const baseApy = Number(r25.apy);
+        if (Number.isFinite(baseApy)) market.r25BaseApy = baseApy;
+      }
+    }
+  } catch {
+  }
+}
 async function runVaults(opts) {
   const errors = [];
   let vaults = [];
@@ -38979,6 +39069,7 @@ async function runVaults(opts) {
   } catch (e) {
     errors.push({ scope: "harbor", error: String(e.message ?? e) });
   }
+  await enrichWithR25(vaults, opts);
   return makeEnvelope({ vaults }, errors, await safeUpdate(opts));
 }
 async function navFor(entry, provider) {
@@ -38990,11 +39081,76 @@ async function navFor(entry, provider) {
     return { nav: null, apy: entry.apyFallback, navResolvedFrom: "none" };
   }
 }
+function toR25HoldingInfo(h, positionsData, nowMs) {
+  const info = {
+    earnings: Number(h.totalEarnings) || 0,
+    fiatEarnings: Number(h.fiatEarnings) || 0,
+    baseApy: Number(h.apy) || 0,
+    boost: h.boostInfo ? {
+      boostApy: Number(h.boostInfo.boostApy) || 0,
+      yesterdayEarnings: Number(h.boostInfo.yesterdayEarnings) || 0,
+      totalBoostEarnings: Number(h.boostInfo.totalBoostEarnings) || 0,
+      validUntil: h.boostInfo.validUntil ? new Date(h.boostInfo.validUntil).toISOString().slice(0, 10) : null,
+      sponsor: h.boostInfo.sponsor
+    } : null,
+    hasRedeemRequest: h.hasRedeemRequest
+  };
+  if (positionsData && positionsData.available.length > 0) {
+    const now = nowMs ?? Date.now();
+    info.tranches = positionsData.available.map((t) => {
+      const expMs = t.expirationDate;
+      const expSec = Math.floor(expMs / 1e3);
+      const days = Math.round((expMs - now) / 864e5);
+      return {
+        shares: Number(t.shares) || 0,
+        amountUsdc: Number(t.amountUsdc) || 0,
+        expirationDate: new Date(expMs).toISOString().slice(0, 10),
+        expirationTs: expSec,
+        daysUntilExpiration: days,
+        expired: expMs <= now
+      };
+    }).sort((a, b2) => a.expirationTs - b2.expirationTs);
+    if (positionsData.redemptionFreezeWindow > 0) {
+      info.redemptionFreezeWindowMs = positionsData.redemptionFreezeWindow;
+    }
+  }
+  return info;
+}
 async function buildPositions(address, opts, errors) {
   const registry = await loadRegistry({ noRemote: opts.noRemote });
   const provider = providerFor(opts);
   const now = opts.now ?? nowSec();
   const positions = [];
+  const hasR25Vaults = registry.some((e) => e.r25VaultId);
+  let r25Holdings = null;
+  const r25Periods = /* @__PURE__ */ new Map();
+  const r25Positions = /* @__PURE__ */ new Map();
+  if (hasR25Vaults) {
+    try {
+      const holdings = await fetchR25Holdings(address);
+      if (holdings) r25Holdings = new Map(holdings.map((h) => [h.vaultId, h]));
+    } catch {
+    }
+    for (const entry of registry) {
+      if (entry.r25VaultId && entry.actionPeriodConfig) {
+        try {
+          const period = await fetchR25VaultPeriod(entry.r25VaultId);
+          if (period) r25Periods.set(entry.r25VaultId, period);
+        } catch {
+        }
+      }
+    }
+    if (r25Holdings) {
+      for (const entry of registry) {
+        if (!entry.r25VaultId || !r25Holdings.has(entry.r25VaultId)) continue;
+        try {
+          const pos = await fetchR25Positions(address, entry.r25VaultId);
+          if (pos) r25Positions.set(entry.r25VaultId, pos);
+        } catch {
+        }
+      }
+    }
+  }
   await Promise.allSettled(registry.map(async (entry) => {
     try {
       const rpcOverrides = opts.rpc ? { [DEFAULT_CHAIN_ID]: opts.rpc } : {};
@@ -39011,9 +39167,31 @@ async function buildPositions(address, opts, errors) {
         }
       }
       const hasRedeemActivity = rawRedeem != null && (rawRedeem.pendingRedeemShares > 0 || rawRedeem.claimableRedeemShares > 0 || rawRedeem.maxRedeemShares > 0);
-      if (shares.totalRaw === 0n && !hasRedeemActivity) return;
-      const { nav, apy, navResolvedFrom } = await navFor(entry, provider);
-      const actionPeriod = rawRedeem != null ? resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability.lockDays, entry.redeemability.async) : resolveActionPeriod(entry, now);
+      const r25h = entry.r25VaultId ? r25Holdings?.get(entry.r25VaultId) : void 0;
+      if (shares.totalRaw === 0n && !hasRedeemActivity && !r25h) return;
+      let nav;
+      let apy;
+      let navResolvedFrom;
+      if (r25h) {
+        nav = Number(r25h.nav) || null;
+        const baseApy = Number(r25h.apy) || entry.apyFallback;
+        const boostApy = r25h.boostInfo ? Number(r25h.boostInfo.boostApy) || 0 : 0;
+        apy = baseApy + boostApy;
+        navResolvedFrom = "r25-api";
+      } else {
+        const result = await navFor(entry, provider);
+        nav = result.nav;
+        apy = result.apy;
+        navResolvedFrom = result.navResolvedFrom;
+      }
+      let actionPeriod;
+      if (rawRedeem != null) {
+        actionPeriod = resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability.lockDays, entry.redeemability.async);
+      } else if (entry.r25VaultId && r25Periods.has(entry.r25VaultId)) {
+        actionPeriod = resolveR25ActionPeriod(r25Periods.get(entry.r25VaultId), now);
+      } else {
+        actionPeriod = resolveActionPeriod(entry, now);
+      }
       const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;
       const effectiveShares = (Number(shares.totalHuman) + escrowedShares).toString();
       const common = { entry, sharesHuman: effectiveShares, nav, apy, actionPeriod, now, navResolvedFrom };
@@ -39028,7 +39206,12 @@ async function buildPositions(address, opts, errors) {
           errors.push({ scope: `${entry.id}:ember`, error: String(e.message ?? e) });
         }
       }
-      positions.push(computePosition(common));
+      if (r25h) {
+        const posData = entry.r25VaultId ? r25Positions.get(entry.r25VaultId) : void 0;
+        positions.push(computePosition({ ...common, r25Holding: toR25HoldingInfo(r25h, posData) }));
+      } else {
+        positions.push(computePosition(common));
+      }
     } catch (e) {
       errors.push({ scope: entry.id, error: String(e.message ?? e) });
     }
@@ -39053,6 +39236,7 @@ async function runAdvise(address, opts) {
   } catch (e) {
     errors.push({ scope: "harbor", error: String(e.message ?? e) });
   }
+  await enrichWithR25(market, opts);
   const positions = await buildPositions(address, opts, errors);
   return makeEnvelope(buildAdvice(market, positions), errors, await safeUpdate(opts));
 }

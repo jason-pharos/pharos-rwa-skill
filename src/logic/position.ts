@@ -1,4 +1,4 @@
-import type { ActionPeriod, Position, VaultRegistryEntry } from '../types.ts';
+import type { ActionPeriod, Position, R25HoldingInfo, VaultRegistryEntry } from '../types.ts';
 import { isoToSec, dayDiff } from '../util/time.ts';
 
 const SECONDS_PER_YEAR = 31557600; // 365.25d
@@ -30,12 +30,19 @@ export function computePosition(args: {
   actionPeriod: ActionPeriod;
   now: number;
   navResolvedFrom?: string;
+  /** Real earnings from the R25 holdings API. When present, replaces the
+   *  entryNavBaseline estimate with actual yield data. */
+  r25Holding?: R25HoldingInfo;
 }): Position {
-  const { entry, sharesHuman, nav, apy, actionPeriod, now, navResolvedFrom } = args;
+  const { entry, sharesHuman, nav, apy, actionPeriod, now, navResolvedFrom, r25Holding } = args;
   const shares = Number(sharesHuman);
   const currentValue = nav != null ? shares * nav : null;
-  const principal = shares * entry.entryNavBaseline;
-  const realizedYield = currentValue != null ? currentValue - principal : null;
+
+  // When R25 data is available, use actual earnings; principal is derived
+  // (currentValue − realEarnings) instead of estimated (shares × entryNavBaseline).
+  const hasRealEarnings = r25Holding != null && currentValue != null;
+  const realizedYield = hasRealEarnings ? r25Holding.earnings : (currentValue != null ? currentValue - shares * entry.entryNavBaseline : null);
+  const principal = hasRealEarnings ? currentValue - r25Holding.earnings : shares * entry.entryNavBaseline;
 
   const { depositedDurationDays, remainingLockYears } = lockTiming(entry, now);
 
@@ -51,18 +58,24 @@ export function computePosition(args: {
     ? (realizedYield ?? 0) + projectionBase * effectiveApy * remainingLockYears
     : null;
 
-  return {
+  const assumptions: Record<string, string | number> = {
+    navResolvedFrom: navResolvedFrom ?? 'onchain',
+    // expectedTotalYield is cumulative-to-lock-end, not per-epoch.
+    expectedYieldBasis: 'earned-to-date + apy x time-to-lock-end',
+  };
+  if (hasRealEarnings) {
+    assumptions.valueResolvedFrom = 'r25-api';
+  } else {
+    assumptions.entryNav = entry.entryNavBaseline;
+  }
+
+  const position: Position = {
     vault: entry.id,
     shares: sharesHuman,
     nav,
     currentValue,
-    estimated: true,
-    assumptions: {
-      entryNav: entry.entryNavBaseline,
-      navResolvedFrom: navResolvedFrom ?? 'onchain',
-      // expectedTotalYield is cumulative-to-lock-end, not per-epoch.
-      expectedYieldBasis: 'earned-to-date + apy x time-to-lock-end',
-    },
+    estimated: !hasRealEarnings,
+    assumptions,
     principal,
     realizedYield,
     depositedDurationDays,
@@ -70,4 +83,6 @@ export function computePosition(args: {
     expectedTotalYield,
     actionPeriod,
   };
+  if (r25Holding) position.r25 = r25Holding;
+  return position;
 }

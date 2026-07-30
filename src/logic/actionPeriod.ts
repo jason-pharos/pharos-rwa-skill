@@ -1,5 +1,6 @@
 import type { ActionPeriod, Redeemable, VaultRegistryEntry } from '../types.ts';
 import type { RawRedeemability } from '../sources/chain.ts';
+import type { R25VaultPeriod } from '../sources/r25.ts';
 import { isoToSec, secToIso, windowState } from '../util/time.ts';
 
 function build(startTs: number | null, endTs: number | null, withdrawableTs: number | null, source: ActionPeriod['source'], now: number): ActionPeriod {
@@ -34,6 +35,18 @@ export function resolveActionPeriod(entry: VaultRegistryEntry, now: number): Act
   const wTs = isoToSec(cfg.withdrawable);
   if (startTs !== null && endTs !== null) return build(startTs, endTs, wTs, 'config', now);
   return build(null, null, null, 'unavailable', now);
+}
+
+/**
+ * R25-API-based action period (APC3M): dynamic window dates from the R25
+ * /dapp/vault/period endpoint. Replaces hardcoded actionPeriodConfig when the
+ * API is reachable; falls back to config otherwise.
+ */
+export function resolveR25ActionPeriod(period: R25VaultPeriod, now: number): ActionPeriod {
+  const startTs = period.withdrawalWindowStart != null ? Math.floor(period.withdrawalWindowStart / 1000) : null;
+  const endTs = period.withdrawalWindowEnd != null ? Math.floor(period.withdrawalWindowEnd / 1000) : null;
+  const maturityTs = period.nextMaturityDate != null ? Math.floor(period.nextMaturityDate / 1000) : null;
+  return build(startTs, endTs, maturityTs, 'r25-api', now);
 }
 
 /**

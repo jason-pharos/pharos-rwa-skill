@@ -64,6 +64,12 @@ export interface VaultRegistryEntry {
   entryNavBaseline: number;    // epoch-NAV approximation entry price
   apyFallback: number;         // decimal, e.g. 0.14 — APY (registry-maintained, per epoch)
   /**
+   * R25 dApp API vault ID. Present only for vaults served by the R25 API
+   * (APC3M→"APC3M", VRPC-SemiYearly→"VRPCS", VRPC-Weekly→"VRPCW").
+   * Absent for non-R25 vaults (pALPHA) — those use Ember or on-chain only.
+   */
+  r25VaultId?: string;
+  /**
    * Fixed withdraw-window dates (APC3M, pALPHA). Absent for redeemability-based
    * vaults (VRPC-SemiYearly), whose action period comes from the contract.
    */
@@ -76,7 +82,7 @@ export interface VaultRegistryEntry {
   };
 }
 
-export type ActionPeriodSource = 'config' | 'onchain-redeemable' | 'unavailable';
+export type ActionPeriodSource = 'config' | 'onchain-redeemable' | 'r25-api' | 'unavailable';
 
 /**
  * Live redeemability of a VRPC vault, in place of fixed window dates. Covers
@@ -123,6 +129,39 @@ export interface YieldBreakdown {
   total: number;
 }
 
+/** Boost / incentive info from the R25 holdings API (e.g. TopNod sponsor). */
+export interface R25BoostInfo {
+  boostApy: number;            // extra APY as decimal (e.g. 0.03 = 3%)
+  yesterdayEarnings: number;
+  totalBoostEarnings: number;
+  validUntil: string | null;   // ISO date
+  sponsor: string;
+}
+
+/** One deposit tranche within a vault position (from R25 positions API). */
+export interface R25Tranche {
+  shares: number;
+  amountUsdc: number;
+  expirationDate: string;      // ISO date (e.g. "2026-11-30")
+  expirationTs: number;        // epoch seconds
+  daysUntilExpiration: number;
+  expired: boolean;
+}
+
+/** Real (non-estimated) position data from the R25 holdings API. */
+export interface R25HoldingInfo {
+  earnings: number;            // totalEarnings — actual yield, not estimated
+  fiatEarnings: number;
+  baseApy: number;             // base APY from R25 (before boost)
+  boost: R25BoostInfo | null;
+  hasRedeemRequest: boolean | null;
+  /** Per-tranche breakdown (APC3M, VRPCS only). Each tranche = one deposit
+   *  with its own lock expiration. Absent for VRPCW (unsupported by API). */
+  tranches?: R25Tranche[];
+  /** Freeze window (ms) before a redeem request can be settled (VRPCS). */
+  redemptionFreezeWindowMs?: number;
+}
+
 export interface Position {
   vault: VaultId;
   shares: string;              // human-readable decimal string
@@ -139,17 +178,26 @@ export interface Position {
   lockEnd: string | null;
   expectedTotalYield: number | null;
   actionPeriod: ActionPeriod;
+  /** Present only for R25 vaults with API data (holdings endpoint). */
+  r25?: R25HoldingInfo;
 }
 
 export interface VaultMarket {
   name: string;
-  apy: string;                 // raw string from harbor
+  apy: string;                 // raw string from harbor (includes TopNod boost when available)
   apyValue: number | null;     // parsed decimal, null if unparseable
   tvl: number;
   minimumInvestment: string[];
   assetClass: string;
   topPick: boolean;
   icon: string;
+  /**
+   * Base APY from the R25 dApp API (decimal, e.g. 0.13). This is the rate
+   * before any TopNod boost — buying directly on the R25 website earns this.
+   * The harbor `apy`/`apyValue` above may include a TopNod boost (higher).
+   * Present only for R25 vaults.
+   */
+  r25BaseApy?: number;
 }
 
 export interface AdviceBundle {
