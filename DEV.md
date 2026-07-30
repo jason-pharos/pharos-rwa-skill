@@ -52,13 +52,11 @@ npm version patch        # 0.2.0 → 0.2.1
 npm version minor        # 0.2.0 → 0.3.0
 npm version major        # 0.2.0 → 1.0.0
 
-# 2. Create GitHub Release with cli.js + SKILL.md
+# 2. Create GitHub Release with built cli.js
 gh release create v$(node -p 'require("./package.json").version') \
   --title "v$(node -p 'require("./package.json").version')" \
-  --notes-file <(cat) ./cli.js ./SKILL.md
+  --notes-file <(cat) ./cli.js
 ```
-
-Users install via release assets only (`cli.js` + `SKILL.md`), not the full repo.
 
 The `preversion` hook runs `typecheck && test && build` before bumping — `cli.js` in the release always matches the version tag.
 

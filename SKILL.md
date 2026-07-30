@@ -22,17 +22,6 @@ Zero-dependency CLI to inspect Pharos RWA vault positions and market data. Outpu
   periods and surface new vault opportunities / 每日定时提醒 action period、
   收集最新金库信息（见下方 "Proactive / scheduled use"）
 
-## Installation / 安装
-
-Download the single-file CLI from the [latest release](https://github.com/jason-pharos/pharos-rwa-skill/releases/latest):
-
-```bash
-curl -L -o cli.js https://github.com/jason-pharos/pharos-rwa-skill/releases/latest/download/cli.js
-chmod +x cli.js
-```
-
-No other files or dependencies needed — `cli.js` is self-contained.
-
 ## How to use / 如何使用
 
 Market overview of all vaults (no address needed):
