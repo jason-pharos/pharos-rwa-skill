@@ -1,12 +1,12 @@
 ---
 name: pharos-rwa-manager
-description: "Inspect and manage a user's Pharos RWA vault holdings (APC3M, pALPHA): position value and estimated yield, action-period / withdraw-window reminders, live market overview, and buy/allocation advice. Use this skill whenever the user asks about their Pharos or RWA vault position, APC3M or pALPHA holdings/收益, when they can withdraw or redeem (action period / 什么时候能赎回 / when can I withdraw), which vault to buy or whether to add a new one (该买哪个金库 / Pharos vault 建议), or wants the harbor 金库概览 / open-vault overview — even if they don't name the vault or say 'skill' explicitly. Runs read-only via a zero-dependency CLI given the user's address."
+description: "Inspect and manage a user's Pharos RWA vault holdings (APC3M, pALPHA, VRPC-SemiYearly): position value and estimated yield, action-period / withdraw-window reminders, live market overview, and buy/allocation advice. Use this skill whenever the user asks about their Pharos or RWA vault position, APC3M / pALPHA / VRPC holdings/收益, when they can withdraw or redeem (action period / 什么时候能赎回 / when can I withdraw), which vault to buy or whether to add a new one (该买哪个金库 / Pharos vault 建议), or wants the harbor 金库概览 / open-vault overview — even if they don't name the vault or say 'skill' explicitly. Runs read-only via a zero-dependency CLI given the user's address."
 metadata:
   user-invocable: "true"
   arguments: "vaults | position <address> | reminders <address> | advise <address> | upgrade"
   entry: "cli.js"
   requires: "nodejs>=18"
-  tags: "pharos, rwa, apc3m, palpha, vault, defi, action-period, tooling"
+  tags: "pharos, rwa, apc3m, palpha, vrpc, vault, defi, action-period, tooling"
 ---
 
 # Pharos RWA Manager
@@ -30,7 +30,7 @@ Market overview of all vaults (no address needed):
 node cli.js vaults
 ```
 
-A user's position overview (APC3M + pALPHA):
+A user's position overview (APC3M + pALPHA + VRPC-SemiYearly):
 
 ```bash
 node cli.js position 0xYourAddress
@@ -112,5 +112,8 @@ acting on, or a genuinely new opportunity) — do not send an empty daily ping.
 - `assumptions.valueResolvedFrom: "ember-api"` (pALPHA) means value/yield came from the vault's own accounts API, so `principal` is the real cost basis rather than an entry-NAV approximation — those numbers are the most trustworthy. Such positions also carry `yieldBreakdown` (`realized` = already settled, `unrealized` = still in the position, `total` = `realizedYield`). Without that assumption the position fell back to on-chain `shares × NAV`; check `errors[]` for a `<vault>:ember` entry.
 - `realizedYield` is yield earned SO FAR (cumulative since the holder deposited, which may span earlier epochs). `expectedTotalYield` is forward-looking for every vault — earned-to-date plus APY applied to the remaining lock time (`assumptions.expectedYieldBasis`) — so it is a projection for lock end, not an extra amount on top of `realizedYield`.
 - `actionPeriod.end` (withdraw-request deadline) and `withdrawableDate` (when funds actually come back) are different dates: for pALPHA the request window closes 2026-10-01 but funds are withdrawable 2026-10-20. Don't conflate them when reminding the user.
-- `actionPeriod.source` is `api`, `config`, or `unavailable`. If `unavailable`, say the withdraw window is currently unknown.
-- `errors[]` lists per-scope failures; other data is still valid (partial success).
+- `actionPeriod.source` is `config`, `onchain-redeemable`, or `unavailable`. If `unavailable`, say the withdraw window is currently unknown.
+- **Redeemability-based vaults (VRPC-SemiYearly), `actionPeriod.source: "onchain-redeemable"`** — this vault has NO fixed withdraw window and its lock is 184 days from each user's OWN deposit; the contract exposes no per-user deposit or maturity date, so we report live on-chain redeemability instead of dates. Two limitations to convey honestly to the user:
+  1. **No exact dates.** `actionPeriod.redeemable` tells you how much is actionable RIGHT NOW — `maxRedeemShares`/`maxRedeemValue` (redeemable now), `pendingRedeemShares` (requested, awaiting settlement), `claimableRedeemShares` (settled, claim now), `fullyRedeemable`. There is NO unlock/maturity date available — do NOT state or guess one. The rule is "184-day lock from deposit; request a withdraw ≥7 days before maturity." `depositedDurationDays`, `lockEnd`, and `expectedTotalYield` are `null` for this vault (deposit time is unknown on-chain) — present them as "unknown", not as 0 or a computed value.
+  2. **Cost basis is an approximation.** `principal`/`realizedYield` assume entry NAV = 1 (`assumptions.entryNav`). This vault has no per-user cost-basis API (unlike pALPHA), so if the user bought in multiple tranches or at a different NAV, actual principal/yield differ. Say "约/estimated" and note the entry-NAV assumption.
+- `errors[]` lists per-scope failures; other data is still valid (partial success). A `<vault>:redeemability` entry means the on-chain redeemability read failed (RPC issue) — in that case the withdraw status is unknown, NOT "locked".
