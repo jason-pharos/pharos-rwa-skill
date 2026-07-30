@@ -101,7 +101,7 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
       // other vault uses config dates. A redeemability read failure falls back
       // to config (→ unavailable for VRPC, which has none).
       const actionPeriod = rawRedeem != null
-        ? resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav)
+        ? resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability!.lockDays, entry.redeemability!.async)
         : resolveActionPeriod(entry, now);
 
       // For ERC-7540 vaults, requestRedeem escrows shares OUT of the wallet, so

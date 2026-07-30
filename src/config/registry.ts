@@ -108,9 +108,46 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
       vault: '0xee26bb0989691735c997dfdc49a4a607f75e190b',
       shareDecimals: 6,
       requestId: 0,
+      lockDays: 184,
+      async: true,
     },
     entryNavBaseline: 1.0,
     apyFallback: 0.15,
+    // no actionPeriodConfig — see redeemability above.
+  },
+  {
+    id: 'VRPC-Weekly',
+    displayName: 'VRPC-Weekly',
+    chainId: 1672,
+    shareToken: '0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268',
+    balanceSources: [
+      {
+        chainId: 1672,
+        rpcUrlEnv: 'PHAROS_RPC_URL',
+        rpcUrl: 'https://rpc.pharos.xyz',
+        token: '0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268',
+        decimals: 6,
+      },
+    ],
+    // NAV on-chain: ERC-4626 vault, convertToAssets; share + asset (USDC) 6 dec.
+    onchainNav: {
+      vault: '0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268',
+      shareDecimals: 6,
+      assetDecimals: 6,
+    },
+    // Like VRPC-SemiYearly but a 7-day lock and PLAIN ERC-4626 (SYNC redeem):
+    // maxRedeem works; pendingRedeemRequest/claimableRedeemRequest do NOT exist
+    // (they revert) — getRedeemability tolerates that, so pending/claimable stay
+    // 0. No fixed dates / no on-chain deposit timestamp → redeemability-based.
+    redeemability: {
+      vault: '0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268',
+      shareDecimals: 6,
+      requestId: 0,
+      lockDays: 7,
+      async: false,
+    },
+    entryNavBaseline: 1.0,
+    apyFallback: 0.08,
     // no actionPeriodConfig — see redeemability above.
   },
 ];

@@ -1,6 +1,6 @@
 import type { AdviceBundle, Position, VaultId, VaultMarket } from '../types.ts';
 
-const MARKET_NAME_BY_ID: Record<VaultId, string> = { APC3M: 'APC3M', pALPHA: 'pALPHA', 'VRPC-SemiYearly': 'VRPC-SemiYearly' };
+const MARKET_NAME_BY_ID: Record<VaultId, string> = { APC3M: 'APC3M', pALPHA: 'pALPHA', 'VRPC-SemiYearly': 'VRPC-SemiYearly', 'VRPC-Weekly': 'VRPC-Weekly' };
 
 export function buildAdvice(market: VaultMarket[], positions: Position[]): AdviceBundle {
   const heldVaultIds = positions.map((p) => p.vault);

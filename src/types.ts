@@ -1,4 +1,4 @@
-export type VaultId = 'APC3M' | 'pALPHA' | 'VRPC-SemiYearly';
+export type VaultId = 'APC3M' | 'pALPHA' | 'VRPC-SemiYearly' | 'VRPC-Weekly';
 
 /**
  * One chain on which a vault's share/receipt token lives. A vault's total
@@ -40,17 +40,26 @@ export interface VaultRegistryEntry {
   balanceSources: BalanceSource[]; // all chains to sum shares from
   onchainNav: OnchainNav;      // NAV is always read on-chain via convertToAssets
   /**
-   * Set for ERC-7540 async-redeem vaults (VRPC-SemiYearly) that have NO fixed
-   * global withdraw window and expose no per-user deposit/maturity timestamp
-   * on-chain. Instead of config dates, the action period is derived live from
-   * the contract's redeemability (maxRedeem / pending / claimable). `vault` is
-   * the ERC-7540 contract; requestId is the id passed to
-   * pending/claimableRedeemRequest (0 for single-request vaults).
+   * Set for VRPC vaults whose action period has NO fixed global window and no
+   * per-user deposit/maturity timestamp on-chain. The action period is derived
+   * live from the contract's redeemability (maxRedeem, plus pending/claimable
+   * for the ERC-7540 async variant). `vault` is the contract; requestId is the
+   * id passed to pending/claimableRedeemRequest (0 for single-request vaults);
+   * lockDays is the per-user lock length used only for honest reminder wording
+   * (VRPC-SemiYearly = 184, VRPC-Weekly = 7).
+   *
+   * Both the ERC-7540 async variant (SemiYearly: has pending/claimable) and the
+   * plain ERC-4626 sync variant (Weekly: pending/claimable revert → treated as
+   * 0) are supported by the same path — getRedeemability tolerates the missing
+   * methods.
    */
   redeemability?: {
     vault: string;
     shareDecimals: number;
     requestId: number;
+    lockDays: number;
+    /** true = ERC-7540 async redeem (SemiYearly); false = ERC-4626 sync (Weekly). */
+    async: boolean;
   };
   entryNavBaseline: number;    // epoch-NAV approximation entry price
   apyFallback: number;         // decimal, e.g. 0.14 — APY (registry-maintained, per epoch)
@@ -70,15 +79,21 @@ export interface VaultRegistryEntry {
 export type ActionPeriodSource = 'config' | 'onchain-redeemable' | 'unavailable';
 
 /**
- * Live redeemability of an ERC-7540 async-redeem vault, in place of fixed
- * window dates. All share/value amounts are human-readable numbers.
+ * Live redeemability of a VRPC vault, in place of fixed window dates. Covers
+ * both the ERC-7540 async variant (pending/claimable populated) and the plain
+ * ERC-4626 sync variant (pending/claimable stay 0 — those methods don't exist).
+ * All share/value amounts are human-readable numbers.
  */
 export interface Redeemable {
   maxRedeemShares: number;      // shares currently redeemable (maxRedeem)
   maxRedeemValue: number | null;// maxRedeemShares × NAV (USD), null if NAV unknown
-  pendingRedeemShares: number;  // shares in a submitted-but-not-settled request
-  claimableRedeemShares: number;// shares whose redeem has settled and can be claimed
+  pendingRedeemShares: number;  // shares in a submitted-but-not-settled request (async only)
+  claimableRedeemShares: number;// shares whose redeem has settled and can be claimed (async only)
   fullyRedeemable: boolean;     // maxRedeemShares >= total held shares
+  lockDays: number;             // per-user lock length in days (wording only)
+  /** true = ERC-7540 async (redeem must be REQUESTED first, then settled, then
+   * claimed — SemiYearly); false = ERC-4626 sync (redeem directly — Weekly). */
+  async: boolean;
 }
 
 export interface ActionPeriod {

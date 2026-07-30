@@ -43,9 +43,9 @@ function messageFor(vault: VaultId, u: Urgency, ap: Position['actionPeriod']): s
     case 'future': return `${vault}: withdraw window opens in ${ap.opensInDays} day(s).`;
     case 'closed': return `${vault}: last known withdraw window has passed; config may be stale.`;
     case 'claimable': return `${vault}: ${fmt(r?.claimableRedeemShares ?? 0)} share(s) have settled and can be claimed now.`;
-    case 'redeemable': return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (184-day term, no fixed date on-chain).`;
+    case 'redeemable': return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (${r?.lockDays ?? '?'}-day term, no fixed date on-chain).`;
     case 'pending': return `${vault}: a withdraw request for ${fmt(r?.pendingRedeemShares ?? 0)} share(s) is submitted and awaiting settlement.`;
-    case 'locked': return `${vault}: nothing redeemable right now (locked). Funds unlock ~184 days after deposit; request a withdraw at least 7 days before maturity.`;
+    case 'locked': return `${vault}: nothing redeemable right now (locked). Funds unlock ~${r?.lockDays ?? '?'} days after deposit${r?.async ? '; submit a withdraw request ahead of maturity' : ''}.`;
     default: return `${vault}: action period unavailable.`;
   }
 }

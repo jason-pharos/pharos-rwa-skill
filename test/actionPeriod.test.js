@@ -55,7 +55,7 @@ test('unavailable when config unparseable', () => {
 
 test('redeemable action period: partly redeemable → isOpen, not stale', () => {
   const raw = { maxRedeemShares: 12976.25, pendingRedeemShares: 0, claimableRedeemShares: 0 };
-  const ap = resolveRedeemableActionPeriod(raw, 57656.24, 1.0283);
+  const ap = resolveRedeemableActionPeriod(raw, 57656.24, 1.0283, 184, true);
   assert.equal(ap.source, 'onchain-redeemable');
   assert.equal(ap.isOpen, true);
   assert.equal(ap.stale, false);
@@ -66,7 +66,7 @@ test('redeemable action period: partly redeemable → isOpen, not stale', () => 
 
 test('redeemable action period: nothing redeemable → not open, locked', () => {
   const raw = { maxRedeemShares: 0, pendingRedeemShares: 0, claimableRedeemShares: 0 };
-  const ap = resolveRedeemableActionPeriod(raw, 100, 1.0);
+  const ap = resolveRedeemableActionPeriod(raw, 100, 1.0, 184, true);
   assert.equal(ap.isOpen, false);
   assert.equal(ap.redeemable.fullyRedeemable, false);
   assert.equal(ap.redeemable.maxRedeemValue, 0);
@@ -74,14 +74,14 @@ test('redeemable action period: nothing redeemable → not open, locked', () => 
 
 test('redeemable action period: fully redeemable when maxRedeem >= held', () => {
   const raw = { maxRedeemShares: 100, pendingRedeemShares: 0, claimableRedeemShares: 0 };
-  const ap = resolveRedeemableActionPeriod(raw, 100, 1.0);
+  const ap = resolveRedeemableActionPeriod(raw, 100, 1.0, 184, true);
   assert.equal(ap.redeemable.fullyRedeemable, true);
   assert.equal(ap.isOpen, true);
 });
 
 test('redeemable action period: null nav → null maxRedeemValue', () => {
   const raw = { maxRedeemShares: 50, pendingRedeemShares: 0, claimableRedeemShares: 0 };
-  const ap = resolveRedeemableActionPeriod(raw, 50, null);
+  const ap = resolveRedeemableActionPeriod(raw, 50, null, 184, true);
   assert.equal(ap.redeemable.maxRedeemValue, null);
   assert.equal(ap.isOpen, true);
 });
@@ -89,7 +89,7 @@ test('redeemable action period: null nav → null maxRedeemValue', () => {
 test('redeemable: escrowed shares (pending) count toward total position + keep isOpen', () => {
   // wallet drained to 0 by requestRedeem; 500 shares pending settlement.
   const raw = { maxRedeemShares: 0, pendingRedeemShares: 500, claimableRedeemShares: 0 };
-  const ap = resolveRedeemableActionPeriod(raw, 0, 1.0);
+  const ap = resolveRedeemableActionPeriod(raw, 0, 1.0, 184, true);
   assert.equal(ap.isOpen, true); // pending in flight → still "open"/active
   assert.equal(ap.redeemable.pendingRedeemShares, 500);
   // fullyRedeemable compares maxRedeem(0) against total position(500) → false
@@ -99,7 +99,7 @@ test('redeemable: escrowed shares (pending) count toward total position + keep i
 test('redeemable: fullyRedeemable uses wallet+escrowed as denominator', () => {
   // 60 in wallet, 40 claimable already; maxRedeem 60 == wallet, but total is 100.
   const raw = { maxRedeemShares: 60, pendingRedeemShares: 0, claimableRedeemShares: 40 };
-  const ap = resolveRedeemableActionPeriod(raw, 60, 1.0);
+  const ap = resolveRedeemableActionPeriod(raw, 60, 1.0, 184, true);
   assert.equal(ap.redeemable.fullyRedeemable, false); // 60 < 100 total
   // claimable present → still open
   assert.equal(ap.isOpen, true);

@@ -20996,10 +20996,47 @@ var DEFAULT_REGISTRY = [
     redeemability: {
       vault: "0xee26bb0989691735c997dfdc49a4a607f75e190b",
       shareDecimals: 6,
-      requestId: 0
+      requestId: 0,
+      lockDays: 184,
+      async: true
     },
     entryNavBaseline: 1,
     apyFallback: 0.15
+    // no actionPeriodConfig — see redeemability above.
+  },
+  {
+    id: "VRPC-Weekly",
+    displayName: "VRPC-Weekly",
+    chainId: 1672,
+    shareToken: "0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268",
+    balanceSources: [
+      {
+        chainId: 1672,
+        rpcUrlEnv: "PHAROS_RPC_URL",
+        rpcUrl: "https://rpc.pharos.xyz",
+        token: "0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268",
+        decimals: 6
+      }
+    ],
+    // NAV on-chain: ERC-4626 vault, convertToAssets; share + asset (USDC) 6 dec.
+    onchainNav: {
+      vault: "0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268",
+      shareDecimals: 6,
+      assetDecimals: 6
+    },
+    // Like VRPC-SemiYearly but a 7-day lock and PLAIN ERC-4626 (SYNC redeem):
+    // maxRedeem works; pendingRedeemRequest/claimableRedeemRequest do NOT exist
+    // (they revert) — getRedeemability tolerates that, so pending/claimable stay
+    // 0. No fixed dates / no on-chain deposit timestamp → redeemability-based.
+    redeemability: {
+      vault: "0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268",
+      shareDecimals: 6,
+      requestId: 0,
+      lockDays: 7,
+      async: false
+    },
+    entryNavBaseline: 1,
+    apyFallback: 0.08
     // no actionPeriodConfig — see redeemability above.
   }
 ];
@@ -38666,14 +38703,16 @@ function resolveActionPeriod(entry, now) {
   if (startTs !== null && endTs !== null) return build(startTs, endTs, wTs, "config", now);
   return build(null, null, null, "unavailable", now);
 }
-function resolveRedeemableActionPeriod(raw, walletShares, nav) {
+function resolveRedeemableActionPeriod(raw, walletShares, nav, lockDays, isAsync) {
   const totalPosition = walletShares + raw.pendingRedeemShares + raw.claimableRedeemShares;
   const redeemable = {
     maxRedeemShares: raw.maxRedeemShares,
     maxRedeemValue: nav != null ? raw.maxRedeemShares * nav : null,
     pendingRedeemShares: raw.pendingRedeemShares,
     claimableRedeemShares: raw.claimableRedeemShares,
-    fullyRedeemable: totalPosition > 0 && raw.maxRedeemShares >= totalPosition
+    fullyRedeemable: totalPosition > 0 && raw.maxRedeemShares >= totalPosition,
+    lockDays,
+    async: isAsync
   };
   const isOpen = raw.maxRedeemShares > 0 || raw.claimableRedeemShares > 0 || raw.pendingRedeemShares > 0;
   return {
@@ -38829,11 +38868,11 @@ function messageFor(vault, u, ap) {
     case "claimable":
       return `${vault}: ${fmt(r?.claimableRedeemShares ?? 0)} share(s) have settled and can be claimed now.`;
     case "redeemable":
-      return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (184-day term, no fixed date on-chain).`;
+      return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (${r?.lockDays ?? "?"}-day term, no fixed date on-chain).`;
     case "pending":
       return `${vault}: a withdraw request for ${fmt(r?.pendingRedeemShares ?? 0)} share(s) is submitted and awaiting settlement.`;
     case "locked":
-      return `${vault}: nothing redeemable right now (locked). Funds unlock ~184 days after deposit; request a withdraw at least 7 days before maturity.`;
+      return `${vault}: nothing redeemable right now (locked). Funds unlock ~${r?.lockDays ?? "?"} days after deposit${r?.async ? "; submit a withdraw request ahead of maturity" : ""}.`;
     default:
       return `${vault}: action period unavailable.`;
   }
@@ -38846,7 +38885,7 @@ function buildReminders(positions) {
 }
 
 // src/logic/advise.ts
-var MARKET_NAME_BY_ID = { APC3M: "APC3M", pALPHA: "pALPHA", "VRPC-SemiYearly": "VRPC-SemiYearly" };
+var MARKET_NAME_BY_ID = { APC3M: "APC3M", pALPHA: "pALPHA", "VRPC-SemiYearly": "VRPC-SemiYearly", "VRPC-Weekly": "VRPC-Weekly" };
 function buildAdvice(market, positions) {
   const heldVaultIds = positions.map((p) => p.vault);
   const heldNames = new Set(heldVaultIds.map((id2) => MARKET_NAME_BY_ID[id2]));
@@ -38974,7 +39013,7 @@ async function buildPositions(address, opts, errors) {
       const hasRedeemActivity = rawRedeem != null && (rawRedeem.pendingRedeemShares > 0 || rawRedeem.claimableRedeemShares > 0 || rawRedeem.maxRedeemShares > 0);
       if (shares.totalRaw === 0n && !hasRedeemActivity) return;
       const { nav, apy, navResolvedFrom } = await navFor(entry, provider);
-      const actionPeriod = rawRedeem != null ? resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav) : resolveActionPeriod(entry, now);
+      const actionPeriod = rawRedeem != null ? resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability.lockDays, entry.redeemability.async) : resolveActionPeriod(entry, now);
       const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;
       const effectiveShares = (Number(shares.totalHuman) + escrowedShares).toString();
       const common = { entry, sharesHuman: effectiveShares, nav, apy, actionPeriod, now, navResolvedFrom };

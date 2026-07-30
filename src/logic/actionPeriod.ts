@@ -37,18 +37,21 @@ export function resolveActionPeriod(entry: VaultRegistryEntry, now: number): Act
 }
 
 /**
- * Redeemability-based action period (VRPC-SemiYearly): no fixed dates. The
- * "withdraw window" is expressed as how much is redeemable RIGHT NOW, read live
- * from the ERC-7540 contract. `isOpen` = something is redeemable or in flight
+ * Redeemability-based action period (VRPC-SemiYearly / VRPC-Weekly): no fixed
+ * dates. The "withdraw window" is how much is redeemable RIGHT NOW, read live
+ * from the contract. `isOpen` = something is redeemable or in flight
  * (max/pending/claimable > 0); there are no opens/closes-in-days (the exact
- * maturity date is not on-chain).
+ * maturity date is not on-chain). `lockDays` is passed through for reminder
+ * wording only (7 for Weekly, 184 for SemiYearly).
  *
- * NOTE: `walletShares` is the balanceOf in the holder's wallet. ERC-7540
- * requestRedeem escrows shares OUT of the wallet, so the holder's TOTAL
- * position = walletShares + pending + claimable. fullyRedeemable compares
- * maxRedeem against that total, not the (possibly depleted) wallet balance.
+ * NOTE: `walletShares` is the balanceOf in the holder's wallet. The ERC-7540
+ * async variant's requestRedeem escrows shares OUT of the wallet, so the
+ * holder's TOTAL position = walletShares + pending + claimable. fullyRedeemable
+ * compares maxRedeem against that total, not the (possibly depleted) wallet
+ * balance. For the ERC-4626 sync variant pending/claimable are 0, so this
+ * reduces to walletShares.
  */
-export function resolveRedeemableActionPeriod(raw: RawRedeemability, walletShares: number, nav: number | null): ActionPeriod {
+export function resolveRedeemableActionPeriod(raw: RawRedeemability, walletShares: number, nav: number | null, lockDays: number, isAsync: boolean): ActionPeriod {
   const totalPosition = walletShares + raw.pendingRedeemShares + raw.claimableRedeemShares;
   const redeemable: Redeemable = {
     maxRedeemShares: raw.maxRedeemShares,
@@ -56,6 +59,8 @@ export function resolveRedeemableActionPeriod(raw: RawRedeemability, walletShare
     pendingRedeemShares: raw.pendingRedeemShares,
     claimableRedeemShares: raw.claimableRedeemShares,
     fullyRedeemable: totalPosition > 0 && raw.maxRedeemShares >= totalPosition,
+    lockDays,
+    async: isAsync,
   };
   const isOpen = raw.maxRedeemShares > 0 || raw.claimableRedeemShares > 0 || raw.pendingRedeemShares > 0;
   return {

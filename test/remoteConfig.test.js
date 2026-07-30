@@ -59,3 +59,14 @@ test('registry balanceSources: pALPHA spans Pharos+Ethereum, APC3M single Pharos
   assert.equal(byChain[1].token, '0xC3AaCb558aFB635307B66FDb405188138576fc4c');
   assert.equal(byChain[1].rpcUrlEnv, 'ETHEREUM_RPC_URL');
 });
+
+test('registry: both VRPC vaults are redeemability-based with correct lockDays', () => {
+  const wk = DEFAULT_REGISTRY.find((v) => v.id === 'VRPC-Weekly');
+  const sy = DEFAULT_REGISTRY.find((v) => v.id === 'VRPC-SemiYearly');
+  assert.ok(wk && sy);
+  assert.equal(wk.redeemability.lockDays, 7);
+  assert.equal(sy.redeemability.lockDays, 184);
+  assert.equal(wk.redeemability.vault, '0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268');
+  assert.equal(wk.actionPeriodConfig, undefined); // no fixed dates
+  assert.equal(wk.onchainNav.assetDecimals, 6);
+});
