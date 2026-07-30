@@ -2,18 +2,33 @@
   "name": "pharos-rwa-skill",
   "version": "0.2.0",
   "type": "module",
-  "engines": { "node": ">=18" },
-  "bin": { "pharos-rwa": "./cli.js" },
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "pharos-rwa": "./skills/pharos-rwa-manager/cli.js"
+  },
   "scripts": {
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/**/*.test.js",
-    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node18 --outfile=cli.js --banner:js=$'#!/usr/bin/env node\\nimport { createRequire as __cr } from \\'node:module\\'; const require = __cr(import.meta.url);' --define:__VERSION__=\"\\\"$npm_package_version\\\"\" --define:__OWNER__='\"jason-pharos\"' --define:__REPO__='\"pharos-rwa-skill\"' && chmod +x cli.js",
-    "preversion": "npm run typecheck && npm test && npm run build",
-    "version": "git add -A",
-    "postversion": "git push --follow-tags",
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node18 --outfile=skills/pharos-rwa-manager/cli.js --banner:js=$'#!/usr/bin/env node\\nimport { createRequire as __cr } from \\'node:module\\'; const require = __cr(import.meta.url);' --define:__VERSION__=\"\\\"$npm_package_version\\\"\" --define:__OWNER__='\"jason-pharos\"' --define:__REPO__='\"pharos-rwa-skill\"' && chmod +x skills/pharos-rwa-manager/cli.js",
+    "dist": "rm -rf dist && mkdir -p dist && cp skills/pharos-rwa-manager/cli.js dist/cli.js && shasum -a 256 dist/cli.js | awk '{print $1}' > dist/cli.js.sha256",
+    "release:gh": "npm run dist && gh release create v$npm_package_version --title v$npm_package_version --generate-notes dist/cli.js dist/cli.js.sha256 skills/pharos-rwa-manager/SKILL.md",
+    "preversion": "npm run typecheck && npm test",
+    "version": "npm run build && git add -A",
+    "postversion": "git push --follow-tags && npm run release:gh",
     "release": "npm version $npm_config_bump"
   },
-  "dependencies": { "ethers": "^6", "commander": "^12", "@ember-finance/sdk": "^1.4.6" },
-  "devDependencies": { "typescript": "^5", "@types/node": "^20", "tsx": "^4", "esbuild": "^0.24" }
+  "dependencies": {
+    "@ember-finance/sdk": "^1.4.6",
+    "commander": "^12",
+    "ethers": "^6"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "esbuild": "^0.24",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
 }

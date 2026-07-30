@@ -16,8 +16,7 @@ Requirements: Node.js >= 18. No `npm install` — `cli.js` is a committed bundle
 
 Use [`npx skills`](https://github.com/vercel-labs/skills), the open agent-skills
 installer. It supports Claude Code, OpenCode, Codex, Cursor and ~30 other agents,
-and installs the whole skill directory (`SKILL.md` + `cli.js`), not just the
-markdown:
+and installs just the skill directory — `SKILL.md` + `cli.js`, no source tree:
 
 ```bash
 npx skills add jason-pharos/pharos-rwa-skill
@@ -39,15 +38,23 @@ The skill lands in your agent's skills directory (e.g.
 
 ### Manual install
 
-If your agent isn't covered by `npx skills`, just clone the repo — the skill is a
-plain directory:
+If your agent isn't covered by `npx skills`, pull the two files straight from the
+latest GitHub Release — no clone, no source:
+
+```bash
+mkdir -p ~/.claude/skills/pharos-rwa-manager && cd $_
+curl -sLO https://github.com/jason-pharos/pharos-rwa-skill/releases/latest/download/SKILL.md
+curl -sLO https://github.com/jason-pharos/pharos-rwa-skill/releases/latest/download/cli.js
+```
+
+Or clone the repo and use the `skills/pharos-rwa-manager/` directory:
 
 ```bash
 git clone https://github.com/jason-pharos/pharos-rwa-skill.git
 ```
 
-Clone it anywhere the agent can reach. If your agent has a conventional skills
-directory, clone straight into it, e.g.:
+Put the skill directory anywhere the agent can reach. If your agent has a
+conventional skills directory, install straight into it, e.g.:
 
 | Agent | Skills directory |
 |---|---|
@@ -125,19 +132,26 @@ npm install
 npm run dev -- vaults   # tsx, runs TS source
 npm test                # tsx --test
 npm run typecheck       # tsc --noEmit
-npm run build           # esbuild → cli.js (commit this)
+npm run build           # esbuild → skills/pharos-rwa-manager/cli.js (commit this)
 ```
 
-After editing `src/`, always `npm run build` and commit `cli.js`. CI check: `npm run build && git diff --exit-code cli.js`.
+The published skill is `skills/pharos-rwa-manager/` and contains only `SKILL.md`
+and `cli.js` — that is what keeps installs from pulling the source tree.
 
+After editing `src/`, always `npm run build` and commit `cli.js`. CI check:
+`npm run build && git diff --exit-code skills/pharos-rwa-manager/cli.js`.
+
+See [DEV.md](DEV.md) for the full layout and packaging rules.
 
 ## Cutting a release (code updates)
 
-1. Bump `version` in `package.json`.
-2. `npm run build`.
-3. `shasum -a 256 cli.js | awk '{print $1}' > cli.js.sha256`.
-4. Commit `cli.js`.
-5. Create a GitHub Release tagged `vX.Y.Z`, upload `cli.js` and `cli.js.sha256` as assets.
+```bash
+npm version patch    # typecheck → test → build → commit → tag → push → GitHub Release
+```
+
+`postversion` calls `npm run release:gh`, which uploads `cli.js`,
+`cli.js.sha256`, and `SKILL.md` as release assets. Requires an authenticated
+`gh` CLI. Details in [DEV.md](DEV.md).
 6. Users get an `updateAvailable` hint next run; `node cli.js upgrade` pulls it.
 
 ## v2 notes
