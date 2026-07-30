@@ -152,25 +152,33 @@ export interface VaultShares {
  * source reports different decimals it is normalized to the first source's
  * decimals before summing so totals stay correct.
  */
-export async function getVaultShares(sources: BalanceSource[], holder: string, rpcOverrides: Record<number, string> = {}): Promise<VaultShares> {
-  const results = await Promise.allSettled(
-    sources.map(async (src): Promise<SourceBalance> => {
-      const provider = makeProvider(resolveSourceRpc(src, rpcOverrides), src.chainId);
+async function tryReadBalance(src: BalanceSource, holder: string, rpcOverrides: Record<number, string>): Promise<SourceBalance> {
+  const rpcs = [resolveSourceRpc(src, rpcOverrides), ...(src.rpcUrlFallbacks ?? [])];
+  // Try each RPC in order until one succeeds.
+  const errors: string[] = [];
+  for (const rpc of rpcs) {
+    try {
+      const provider = makeProvider(rpc, src.chainId);
       const decimals = src.decimals ?? (await getErc20Decimals(src.token, provider));
       const raw = await getErc20Balance(src.token, holder, provider);
       return { chainId: src.chainId, token: src.token, raw, decimals, human: formatUnits(raw, decimals) };
-    })
+    } catch (e) {
+      errors.push(String((e as Error)?.message ?? e));
+    }
+  }
+  throw new Error(errors[0] ?? `all ${rpcs.length} RPCs failed for chain ${src.chainId}`);
+}
+
+export async function getVaultShares(sources: BalanceSource[], holder: string, rpcOverrides: Record<number, string> = {}): Promise<VaultShares> {
+  const results = await Promise.allSettled(
+    sources.map((src) => tryReadBalance(src, holder, rpcOverrides))
   );
 
   const ok: SourceBalance[] = [];
   const errors: Array<{ chainId: number; error: string }> = [];
   results.forEach((r, i) => {
     if (r.status === 'fulfilled') ok.push(r.value);
-    else {
-      const src = sources[i]!;
-      const msg = String((r.reason as Error)?.message ?? r.reason);
-      errors.push({ chainId: src.chainId, error: (msg && msg !== 'undefined') ? msg : `read failed for ${src.token} at ${src.rpcUrl}` });
-    }
+    else errors.push({ chainId: sources[i]!.chainId, error: String((r.reason as Error)?.message ?? r.reason) });
   });
 
   const decimals = ok[0]?.decimals ?? sources[0]?.decimals ?? 18;

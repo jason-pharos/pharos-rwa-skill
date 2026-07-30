@@ -52,6 +52,11 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
         chainId: 1,
         rpcUrlEnv: 'ETHEREUM_RPC_URL',
         rpcUrl: 'https://ethereum-rpc.publicnode.com',
+        rpcUrlFallbacks: [
+          'https://eth.llamarpc.com',
+          'https://rpc.ankr.com/eth',
+          'https://eth.drpc.org',
+        ],
         token: '0xC3AaCb558aFB635307B66FDb405188138576fc4c',
         decimals: 6,
       },

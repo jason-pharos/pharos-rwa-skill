@@ -20941,6 +20941,11 @@ var DEFAULT_REGISTRY = [
         chainId: 1,
         rpcUrlEnv: "ETHEREUM_RPC_URL",
         rpcUrl: "https://ethereum-rpc.publicnode.com",
+        rpcUrlFallbacks: [
+          "https://eth.llamarpc.com",
+          "https://rpc.ankr.com/eth",
+          "https://eth.drpc.org"
+        ],
         token: "0xC3AaCb558aFB635307B66FDb405188138576fc4c",
         decimals: 6
       }
@@ -38684,14 +38689,24 @@ function sumSourceBalances(ok, fallbackDecimals) {
   }
   return { totalRaw, decimals };
 }
+async function tryReadBalance(src, holder, rpcOverrides) {
+  const rpcs = [resolveSourceRpc(src, rpcOverrides), ...src.rpcUrlFallbacks ?? []];
+  const errors = [];
+  for (const rpc of rpcs) {
+    try {
+      const provider = makeProvider(rpc, src.chainId);
+      const decimals = src.decimals ?? await getErc20Decimals(src.token, provider);
+      const raw = await getErc20Balance(src.token, holder, provider);
+      return { chainId: src.chainId, token: src.token, raw, decimals, human: formatUnits(raw, decimals) };
+    } catch (e) {
+      errors.push(String(e?.message ?? e));
+    }
+  }
+  throw new Error(errors[0] ?? `all ${rpcs.length} RPCs failed for chain ${src.chainId}`);
+}
 async function getVaultShares(sources, holder, rpcOverrides = {}) {
   const results = await Promise.allSettled(
-    sources.map(async (src) => {
-      const provider = makeProvider(resolveSourceRpc(src, rpcOverrides), src.chainId);
-      const decimals2 = src.decimals ?? await getErc20Decimals(src.token, provider);
-      const raw = await getErc20Balance(src.token, holder, provider);
-      return { chainId: src.chainId, token: src.token, raw, decimals: decimals2, human: formatUnits(raw, decimals2) };
-    })
+    sources.map((src) => tryReadBalance(src, holder, rpcOverrides))
   );
   const ok = [];
   const errors = [];
