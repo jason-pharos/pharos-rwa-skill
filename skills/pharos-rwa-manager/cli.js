@@ -20884,7 +20884,7 @@ var {
 } = import_index.default;
 
 // src/version.ts
-var VERSION = true ? "0.2.0" : "0.0.0-dev";
+var VERSION = true ? "0.2.1" : "0.0.0-dev";
 var OWNER = true ? "jason-pharos" : "jason-pharos";
 var REPO = true ? "pharos-rwa-skill" : "pharos-rwa-skill";
 
