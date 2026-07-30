@@ -77,4 +77,40 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
       withdrawable: '2026-10-20',
     },
   },
+  {
+    id: 'VRPC-SemiYearly',
+    displayName: 'VRPC-SemiYearly',
+    chainId: 1672,
+    shareToken: '0xee26bb0989691735c997dfdc49a4a607f75e190b',
+    balanceSources: [
+      {
+        chainId: 1672,
+        rpcUrlEnv: 'PHAROS_RPC_URL',
+        rpcUrl: 'https://rpc.pharos.xyz',
+        token: '0xee26bb0989691735c997dfdc49a4a607f75e190b',
+        decimals: 6,
+      },
+    ],
+    // NAV on-chain: the vault is ERC-4626/7540 and exposes convertToAssets;
+    // share + asset (USDC) both 6 decimals.
+    onchainNav: {
+      vault: '0xee26bb0989691735c997dfdc49a4a607f75e190b',
+      shareDecimals: 6,
+      assetDecimals: 6,
+    },
+    // ERC-7540 async-redeem vault. Lock is 184 days from each user's OWN
+    // deposit and a withdraw request must be made >=7 days before maturity —
+    // there is NO fixed global window and the contract exposes no per-user
+    // deposit/maturity timestamp. So the action period is derived live from
+    // the contract's redeemability (maxRedeem / pending / claimable) instead
+    // of config dates. requestId 0 (single-request vault).
+    redeemability: {
+      vault: '0xee26bb0989691735c997dfdc49a4a607f75e190b',
+      shareDecimals: 6,
+      requestId: 0,
+    },
+    entryNavBaseline: 1.0,
+    apyFallback: 0.15,
+    // no actionPeriodConfig — see redeemability above.
+  },
 ];

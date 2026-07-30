@@ -21,12 +21,17 @@ export function mergeRegistry(base: VaultRegistryEntry[], override: unknown): Va
     // Only allow specific fields to be overridden from remote config.
     // Identity/address fields (id, displayName, chainId, shareToken, balanceSources, onchainNav)
     // are always taken from the base and protected from override.
-    return {
+    const merged: VaultRegistryEntry = {
       ...entry,
       apyFallback: patch.apyFallback ?? entry.apyFallback,
       entryNavBaseline: patch.entryNavBaseline ?? entry.entryNavBaseline,
-      actionPeriodConfig: { ...entry.actionPeriodConfig, ...(patch.actionPeriodConfig ?? {}) },
     };
+    // actionPeriodConfig is optional (absent for redeemability-based vaults);
+    // deep-merge the configured dates only when the base entry has them.
+    if (entry.actionPeriodConfig) {
+      merged.actionPeriodConfig = { ...entry.actionPeriodConfig, ...(patch.actionPeriodConfig ?? {}) };
+    }
+    return merged;
   });
 }
 

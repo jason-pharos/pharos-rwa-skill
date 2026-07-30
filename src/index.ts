@@ -1,8 +1,8 @@
 import type { AdviceBundle, Envelope, Position, UpdateInfo, VaultMarket, VaultRegistryEntry } from './types.ts';
 import { loadRegistry } from './config/remoteConfig.ts';
 import { fetchHarbor } from './sources/harbor.ts';
-import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getVaultNavOnchain } from './sources/chain.ts';
-import { resolveActionPeriod } from './logic/actionPeriod.ts';
+import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getVaultNavOnchain, getRedeemability, type RawRedeemability } from './sources/chain.ts';
+import { resolveActionPeriod, resolveRedeemableActionPeriod } from './logic/actionPeriod.ts';
 import { computePosition } from './logic/position.ts';
 import { computePAlphaPosition } from './logic/position-palpha.ts';
 import { fetchEmberPositionValue } from './sources/ember.ts';
@@ -76,10 +76,42 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
       for (const be of shares.errors) {
         errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
       }
-      if (shares.totalRaw === 0n) return; // no position on any chain
+
+      // Redeemability (ERC-7540, VRPC-SemiYearly): read BEFORE the zero-balance
+      // skip. requestRedeem escrows shares OUT of the wallet, so a holder mid
+      // redemption can have wallet balance 0 while still having pending/claimable
+      // shares — we must not drop that position. rawRedeem is undefined on read
+      // failure (recorded as an error) vs. all-zero on a genuine lock.
+      let rawRedeem: RawRedeemability | undefined;
+      if (entry.redeemability) {
+        try {
+          rawRedeem = await getRedeemability(entry.redeemability.vault, address, entry.redeemability.requestId, entry.redeemability.shareDecimals, provider);
+        } catch (e) {
+          errors.push({ scope: `${entry.id}:redeemability`, error: String((e as Error).message ?? e) });
+        }
+      }
+      const hasRedeemActivity = rawRedeem != null
+        && (rawRedeem.pendingRedeemShares > 0 || rawRedeem.claimableRedeemShares > 0 || rawRedeem.maxRedeemShares > 0);
+
+      if (shares.totalRaw === 0n && !hasRedeemActivity) return; // truly nothing to report
+
       const { nav, apy, navResolvedFrom } = await navFor(entry, provider);
-      const actionPeriod = resolveActionPeriod(entry, now);
-      const common = { entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now, navResolvedFrom };
+
+      // Action period: redeemability-based reads live from the contract; every
+      // other vault uses config dates. A redeemability read failure falls back
+      // to config (→ unavailable for VRPC, which has none).
+      const actionPeriod = rawRedeem != null
+        ? resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav)
+        : resolveActionPeriod(entry, now);
+
+      // For ERC-7540 vaults, requestRedeem escrows shares OUT of the wallet, so
+      // the holder's TOTAL position = wallet shares + escrowed (pending +
+      // claimable). Use that total for value/principal so a mid-redemption
+      // position isn't understated.
+      const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;
+      const effectiveShares = (Number(shares.totalHuman) + escrowedShares).toString();
+
+      const common = { entry, sharesHuman: effectiveShares, nav, apy, actionPeriod, now, navResolvedFrom };
 
       // Vaults tracked by the Ember accounts API (pALPHA) get their value and
       // yield split from there; every other vault uses shares × NAV. An API

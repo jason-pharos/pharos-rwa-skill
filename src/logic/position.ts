@@ -13,8 +13,8 @@ export function lockTiming(entry: VaultRegistryEntry, now: number): {
   /** Years left until lock end (0 once the lock has ended). */
   remainingLockYears: number | null;
 } {
-  const lockStartSec = isoToSec(entry.actionPeriodConfig.lockStart);
-  const lockEndSec = isoToSec(entry.actionPeriodConfig.lockEnd);
+  const lockStartSec = isoToSec(entry.actionPeriodConfig?.lockStart ?? '');
+  const lockEndSec = isoToSec(entry.actionPeriodConfig?.lockEnd ?? '');
   return {
     depositedDurationDays: lockStartSec != null && now >= lockStartSec ? dayDiff(lockStartSec, now) : null,
     lockYears: lockStartSec != null && lockEndSec != null ? (lockEndSec - lockStartSec) / SECONDS_PER_YEAR : null,
@@ -66,7 +66,7 @@ export function computePosition(args: {
     principal,
     realizedYield,
     depositedDurationDays,
-    lockEnd: entry.actionPeriodConfig.lockEnd,
+    lockEnd: entry.actionPeriodConfig?.lockEnd ?? null,
     expectedTotalYield,
     actionPeriod,
   };

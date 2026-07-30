@@ -20965,6 +20965,42 @@ var DEFAULT_REGISTRY = [
       actionEnd: "2026-10-01T00:00:00+08:00",
       withdrawable: "2026-10-20"
     }
+  },
+  {
+    id: "VRPC-SemiYearly",
+    displayName: "VRPC-SemiYearly",
+    chainId: 1672,
+    shareToken: "0xee26bb0989691735c997dfdc49a4a607f75e190b",
+    balanceSources: [
+      {
+        chainId: 1672,
+        rpcUrlEnv: "PHAROS_RPC_URL",
+        rpcUrl: "https://rpc.pharos.xyz",
+        token: "0xee26bb0989691735c997dfdc49a4a607f75e190b",
+        decimals: 6
+      }
+    ],
+    // NAV on-chain: the vault is ERC-4626/7540 and exposes convertToAssets;
+    // share + asset (USDC) both 6 decimals.
+    onchainNav: {
+      vault: "0xee26bb0989691735c997dfdc49a4a607f75e190b",
+      shareDecimals: 6,
+      assetDecimals: 6
+    },
+    // ERC-7540 async-redeem vault. Lock is 184 days from each user's OWN
+    // deposit and a withdraw request must be made >=7 days before maturity —
+    // there is NO fixed global window and the contract exposes no per-user
+    // deposit/maturity timestamp. So the action period is derived live from
+    // the contract's redeemability (maxRedeem / pending / claimable) instead
+    // of config dates. requestId 0 (single-request vault).
+    redeemability: {
+      vault: "0xee26bb0989691735c997dfdc49a4a607f75e190b",
+      shareDecimals: 6,
+      requestId: 0
+    },
+    entryNavBaseline: 1,
+    apyFallback: 0.15
+    // no actionPeriodConfig — see redeemability above.
   }
 ];
 
@@ -21044,12 +21080,15 @@ function mergeRegistry(base, override) {
   return base.map((entry) => {
     const patch = o.vaults.find((v) => v && v.id === entry.id);
     if (!patch) return entry;
-    return {
+    const merged = {
       ...entry,
       apyFallback: patch.apyFallback ?? entry.apyFallback,
-      entryNavBaseline: patch.entryNavBaseline ?? entry.entryNavBaseline,
-      actionPeriodConfig: { ...entry.actionPeriodConfig, ...patch.actionPeriodConfig ?? {} }
+      entryNavBaseline: patch.entryNavBaseline ?? entry.entryNavBaseline
     };
+    if (entry.actionPeriodConfig) {
+      merged.actionPeriodConfig = { ...entry.actionPeriodConfig, ...patch.actionPeriodConfig ?? {} };
+    }
+    return merged;
   });
 }
 function configUrl() {
@@ -38515,6 +38554,34 @@ async function getVaultNavOnchain(coreVault, shareDecimals, assetDecimals, provi
   const oneShare = 10n ** BigInt(shareDecimals);
   return toNumber2(await c.convertToAssets(oneShare), assetDecimals);
 }
+var REDEEM_ABI = [
+  "function maxRedeem(address) view returns (uint256)",
+  "function pendingRedeemRequest(uint256,address) view returns (uint256)",
+  "function claimableRedeemRequest(uint256,address) view returns (uint256)"
+];
+async function getRedeemability(vault, holder, requestId, shareDecimals, provider) {
+  const c = new Contract(vault, REDEEM_ABI, provider);
+  const read = async (call) => {
+    try {
+      return { ok: true, v: toNumber2(await call, shareDecimals) };
+    } catch (e) {
+      return { ok: false, e };
+    }
+  };
+  const [maxR, pendR, claimR] = await Promise.all([
+    read(c.maxRedeem(holder)),
+    read(c.pendingRedeemRequest(requestId, holder)),
+    read(c.claimableRedeemRequest(requestId, holder))
+  ]);
+  if (!maxR.ok && !pendR.ok && !claimR.ok) {
+    throw new Error(`redeemability reads all failed: ${String(maxR.e?.message ?? maxR.e)}`);
+  }
+  return {
+    maxRedeemShares: maxR.ok ? maxR.v : 0,
+    pendingRedeemShares: pendR.ok ? pendR.v : 0,
+    claimableRedeemShares: claimR.ok ? claimR.v : 0
+  };
+}
 function resolveSourceRpc(src, rpcOverrides = {}) {
   const override = rpcOverrides[src.chainId];
   if (override && override.length > 0) return override;
@@ -38592,18 +38659,43 @@ function build(startTs, endTs, withdrawableTs, source, now) {
 }
 function resolveActionPeriod(entry, now) {
   const cfg = entry.actionPeriodConfig;
+  if (!cfg) return build(null, null, null, "unavailable", now);
   const startTs = isoToSec(cfg.actionStart);
   const endTs = isoToSec(cfg.actionEnd);
   const wTs = isoToSec(cfg.withdrawable);
   if (startTs !== null && endTs !== null) return build(startTs, endTs, wTs, "config", now);
   return build(null, null, null, "unavailable", now);
 }
+function resolveRedeemableActionPeriod(raw, walletShares, nav) {
+  const totalPosition = walletShares + raw.pendingRedeemShares + raw.claimableRedeemShares;
+  const redeemable = {
+    maxRedeemShares: raw.maxRedeemShares,
+    maxRedeemValue: nav != null ? raw.maxRedeemShares * nav : null,
+    pendingRedeemShares: raw.pendingRedeemShares,
+    claimableRedeemShares: raw.claimableRedeemShares,
+    fullyRedeemable: totalPosition > 0 && raw.maxRedeemShares >= totalPosition
+  };
+  const isOpen = raw.maxRedeemShares > 0 || raw.claimableRedeemShares > 0 || raw.pendingRedeemShares > 0;
+  return {
+    start: null,
+    end: null,
+    startTs: null,
+    endTs: null,
+    withdrawableDate: null,
+    source: "onchain-redeemable",
+    isOpen,
+    opensInDays: null,
+    closesInDays: null,
+    stale: false,
+    redeemable
+  };
+}
 
 // src/logic/position.ts
 var SECONDS_PER_YEAR = 31557600;
 function lockTiming(entry, now) {
-  const lockStartSec = isoToSec(entry.actionPeriodConfig.lockStart);
-  const lockEndSec = isoToSec(entry.actionPeriodConfig.lockEnd);
+  const lockStartSec = isoToSec(entry.actionPeriodConfig?.lockStart ?? "");
+  const lockEndSec = isoToSec(entry.actionPeriodConfig?.lockEnd ?? "");
   return {
     depositedDurationDays: lockStartSec != null && now >= lockStartSec ? dayDiff(lockStartSec, now) : null,
     lockYears: lockStartSec != null && lockEndSec != null ? (lockEndSec - lockStartSec) / SECONDS_PER_YEAR : null,
@@ -38635,7 +38727,7 @@ function computePosition(args) {
     principal,
     realizedYield,
     depositedDurationDays,
-    lockEnd: entry.actionPeriodConfig.lockEnd,
+    lockEnd: entry.actionPeriodConfig?.lockEnd ?? null,
     expectedTotalYield,
     actionPeriod
   };
@@ -38675,7 +38767,7 @@ function computePAlphaPosition(args) {
     principal,
     realizedYield: totalYield,
     depositedDurationDays,
-    lockEnd: entry.actionPeriodConfig.lockEnd,
+    lockEnd: entry.actionPeriodConfig?.lockEnd ?? null,
     expectedTotalYield,
     actionPeriod
   };
@@ -38705,13 +38797,24 @@ async function fetchEmberPositionValue(address, vaultId) {
 
 // src/logic/reminders.ts
 function classify(ap) {
+  if (ap.source === "onchain-redeemable") {
+    const r = ap.redeemable;
+    if (r && r.claimableRedeemShares > 0) return "claimable";
+    if (r && r.maxRedeemShares > 0) return "redeemable";
+    if (r && r.pendingRedeemShares > 0) return "pending";
+    return "locked";
+  }
   if (ap.source === "unavailable") return "unknown";
   if (ap.stale) return "closed";
   if (ap.isOpen) return ap.closesInDays != null && ap.closesInDays <= 7 ? "closing-soon" : "open";
   if (ap.opensInDays != null) return ap.opensInDays <= 7 ? "opening-soon" : "future";
   return "unknown";
 }
+function fmt(n2) {
+  return n2.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
 function messageFor(vault, u, ap) {
+  const r = ap.redeemable;
   switch (u) {
     case "closing-soon":
       return `${vault}: withdraw window closes in ${ap.closesInDays} day(s).`;
@@ -38723,6 +38826,14 @@ function messageFor(vault, u, ap) {
       return `${vault}: withdraw window opens in ${ap.opensInDays} day(s).`;
     case "closed":
       return `${vault}: last known withdraw window has passed; config may be stale.`;
+    case "claimable":
+      return `${vault}: ${fmt(r?.claimableRedeemShares ?? 0)} share(s) have settled and can be claimed now.`;
+    case "redeemable":
+      return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (184-day term, no fixed date on-chain).`;
+    case "pending":
+      return `${vault}: a withdraw request for ${fmt(r?.pendingRedeemShares ?? 0)} share(s) is submitted and awaiting settlement.`;
+    case "locked":
+      return `${vault}: nothing redeemable right now (locked). Funds unlock ~184 days after deposit; request a withdraw at least 7 days before maturity.`;
     default:
       return `${vault}: action period unavailable.`;
   }
@@ -38735,7 +38846,7 @@ function buildReminders(positions) {
 }
 
 // src/logic/advise.ts
-var MARKET_NAME_BY_ID = { APC3M: "APC3M", pALPHA: "pALPHA" };
+var MARKET_NAME_BY_ID = { APC3M: "APC3M", pALPHA: "pALPHA", "VRPC-SemiYearly": "VRPC-SemiYearly" };
 function buildAdvice(market, positions) {
   const heldVaultIds = positions.map((p) => p.vault);
   const heldNames = new Set(heldVaultIds.map((id2) => MARKET_NAME_BY_ID[id2]));
@@ -38852,10 +38963,21 @@ async function buildPositions(address, opts, errors) {
       for (const be of shares.errors) {
         errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
       }
-      if (shares.totalRaw === 0n) return;
+      let rawRedeem;
+      if (entry.redeemability) {
+        try {
+          rawRedeem = await getRedeemability(entry.redeemability.vault, address, entry.redeemability.requestId, entry.redeemability.shareDecimals, provider);
+        } catch (e) {
+          errors.push({ scope: `${entry.id}:redeemability`, error: String(e.message ?? e) });
+        }
+      }
+      const hasRedeemActivity = rawRedeem != null && (rawRedeem.pendingRedeemShares > 0 || rawRedeem.claimableRedeemShares > 0 || rawRedeem.maxRedeemShares > 0);
+      if (shares.totalRaw === 0n && !hasRedeemActivity) return;
       const { nav, apy, navResolvedFrom } = await navFor(entry, provider);
-      const actionPeriod = resolveActionPeriod(entry, now);
-      const common = { entry, sharesHuman: shares.totalHuman, nav, apy, actionPeriod, now, navResolvedFrom };
+      const actionPeriod = rawRedeem != null ? resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav) : resolveActionPeriod(entry, now);
+      const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;
+      const effectiveShares = (Number(shares.totalHuman) + escrowedShares).toString();
+      const common = { entry, sharesHuman: effectiveShares, nav, apy, actionPeriod, now, navResolvedFrom };
       if (entry.emberVaultId) {
         try {
           const emberPosition = await fetchEmberPositionValue(address, entry.emberVaultId);

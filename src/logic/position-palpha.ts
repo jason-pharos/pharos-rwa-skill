@@ -78,7 +78,7 @@ export function computePAlphaPosition(args: {
     principal,
     realizedYield: totalYield,
     depositedDurationDays,
-    lockEnd: entry.actionPeriodConfig.lockEnd,
+    lockEnd: entry.actionPeriodConfig?.lockEnd ?? null,
     expectedTotalYield,
     actionPeriod,
   };

@@ -1,4 +1,4 @@
-export type VaultId = 'APC3M' | 'pALPHA';
+export type VaultId = 'APC3M' | 'pALPHA' | 'VRPC-SemiYearly';
 
 /**
  * One chain on which a vault's share/receipt token lives. A vault's total
@@ -39,9 +39,26 @@ export interface VaultRegistryEntry {
   shareToken: string;          // ERC20 whose balanceOf = user shares (primary/Pharos)
   balanceSources: BalanceSource[]; // all chains to sum shares from
   onchainNav: OnchainNav;      // NAV is always read on-chain via convertToAssets
+  /**
+   * Set for ERC-7540 async-redeem vaults (VRPC-SemiYearly) that have NO fixed
+   * global withdraw window and expose no per-user deposit/maturity timestamp
+   * on-chain. Instead of config dates, the action period is derived live from
+   * the contract's redeemability (maxRedeem / pending / claimable). `vault` is
+   * the ERC-7540 contract; requestId is the id passed to
+   * pending/claimableRedeemRequest (0 for single-request vaults).
+   */
+  redeemability?: {
+    vault: string;
+    shareDecimals: number;
+    requestId: number;
+  };
   entryNavBaseline: number;    // epoch-NAV approximation entry price
   apyFallback: number;         // decimal, e.g. 0.14 — APY (registry-maintained, per epoch)
-  actionPeriodConfig: {        // action period (withdraw window) — config for every vault
+  /**
+   * Fixed withdraw-window dates (APC3M, pALPHA). Absent for redeemability-based
+   * vaults (VRPC-SemiYearly), whose action period comes from the contract.
+   */
+  actionPeriodConfig?: {
     lockStart: string;         // ISO8601 with tz
     lockEnd: string;
     actionStart: string;
@@ -50,7 +67,19 @@ export interface VaultRegistryEntry {
   };
 }
 
-export type ActionPeriodSource = 'config' | 'unavailable';
+export type ActionPeriodSource = 'config' | 'onchain-redeemable' | 'unavailable';
+
+/**
+ * Live redeemability of an ERC-7540 async-redeem vault, in place of fixed
+ * window dates. All share/value amounts are human-readable numbers.
+ */
+export interface Redeemable {
+  maxRedeemShares: number;      // shares currently redeemable (maxRedeem)
+  maxRedeemValue: number | null;// maxRedeemShares × NAV (USD), null if NAV unknown
+  pendingRedeemShares: number;  // shares in a submitted-but-not-settled request
+  claimableRedeemShares: number;// shares whose redeem has settled and can be claimed
+  fullyRedeemable: boolean;     // maxRedeemShares >= total held shares
+}
 
 export interface ActionPeriod {
   start: string | null;        // ISO8601
@@ -63,6 +92,8 @@ export interface ActionPeriod {
   opensInDays: number | null;
   closesInDays: number | null;
   stale: boolean;              // true if config window fully in the past
+  /** Present only when source === 'onchain-redeemable' (VRPC-SemiYearly). */
+  redeemable?: Redeemable;
 }
 
 /**

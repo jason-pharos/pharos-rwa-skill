@@ -40,6 +40,56 @@ export async function getVaultNavOnchain(coreVault: string, shareDecimals: numbe
   return toNumber((await c.convertToAssets(oneShare)) as bigint, assetDecimals);
 }
 
+const REDEEM_ABI = [
+  'function maxRedeem(address) view returns (uint256)',
+  'function pendingRedeemRequest(uint256,address) view returns (uint256)',
+  'function claimableRedeemRequest(uint256,address) view returns (uint256)',
+];
+
+export interface RawRedeemability {
+  maxRedeemShares: number;
+  pendingRedeemShares: number;
+  claimableRedeemShares: number;
+}
+
+/**
+ * Read the live redeemability of an ERC-7540 async-redeem vault for a holder.
+ * maxRedeem = shares currently redeemable; pending/claimable = shares in a
+ * submitted / settled redeem request (requestId is 0 for single-request
+ * vaults). Each call is individually tolerant — a method that reverts (e.g.
+ * maxRedeem during a full lock) contributes 0 rather than failing the whole
+ * read.
+ */
+export async function getRedeemability(
+  vault: string,
+  holder: string,
+  requestId: number,
+  shareDecimals: number,
+  provider: JsonRpcProvider,
+): Promise<RawRedeemability> {
+  const c = new Contract(vault, REDEEM_ABI, provider) as any;
+  const read = async (call: Promise<bigint>): Promise<{ ok: true; v: number } | { ok: false; e: unknown }> => {
+    try { return { ok: true, v: toNumber(await call, shareDecimals) }; }
+    catch (e) { return { ok: false, e }; }
+  };
+  const [maxR, pendR, claimR] = await Promise.all([
+    read(c.maxRedeem(holder)),
+    read(c.pendingRedeemRequest(requestId, holder)),
+    read(c.claimableRedeemRequest(requestId, holder)),
+  ]);
+  // Tolerate individual reverts (maxRedeem reverts during a full lock is normal),
+  // but a TOTAL failure means the contract is unreachable / undecodable — throw
+  // so the caller records an error instead of reporting a misleading "locked".
+  if (!maxR.ok && !pendR.ok && !claimR.ok) {
+    throw new Error(`redeemability reads all failed: ${String((maxR.e as Error)?.message ?? maxR.e)}`);
+  }
+  return {
+    maxRedeemShares: maxR.ok ? maxR.v : 0,
+    pendingRedeemShares: pendR.ok ? pendR.v : 0,
+    claimableRedeemShares: claimR.ok ? claimR.v : 0,
+  };
+}
+
 /**
  * Resolve a balance source's RPC URL. Precedence:
  *  1. explicit per-chain override in `rpcOverrides[chainId]` (e.g. the CLI

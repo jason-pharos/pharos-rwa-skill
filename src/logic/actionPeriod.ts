@@ -1,4 +1,5 @@
-import type { ActionPeriod, VaultRegistryEntry } from '../types.ts';
+import type { ActionPeriod, Redeemable, VaultRegistryEntry } from '../types.ts';
+import type { RawRedeemability } from '../sources/chain.ts';
 import { isoToSec, secToIso, windowState } from '../util/time.ts';
 
 function build(startTs: number | null, endTs: number | null, withdrawableTs: number | null, source: ActionPeriod['source'], now: number): ActionPeriod {
@@ -20,17 +21,50 @@ function build(startTs: number | null, endTs: number | null, withdrawableTs: num
 }
 
 /**
- * Action period (the withdraw window) comes from the per-epoch configured
- * dates for BOTH vaults. The pALPHA vault-info API's `phases` are APY accrual
- * periods, NOT withdraw windows, and are not kept up to date — so they must
- * NOT drive the action period. These config dates are maintained per epoch
- * (see config/vaults.json / the registry).
+ * Config-based action period (APC3M, pALPHA): a fixed withdraw window from the
+ * per-epoch configured dates (maintained in the registry / config/vaults.json).
+ * Vaults without actionPeriodConfig (redeemability-based, e.g. VRPC-SemiYearly)
+ * are handled by resolveRedeemableActionPeriod instead.
  */
 export function resolveActionPeriod(entry: VaultRegistryEntry, now: number): ActionPeriod {
   const cfg = entry.actionPeriodConfig;
+  if (!cfg) return build(null, null, null, 'unavailable', now);
   const startTs = isoToSec(cfg.actionStart);
   const endTs = isoToSec(cfg.actionEnd);
   const wTs = isoToSec(cfg.withdrawable);
   if (startTs !== null && endTs !== null) return build(startTs, endTs, wTs, 'config', now);
   return build(null, null, null, 'unavailable', now);
 }
+
+/**
+ * Redeemability-based action period (VRPC-SemiYearly): no fixed dates. The
+ * "withdraw window" is expressed as how much is redeemable RIGHT NOW, read live
+ * from the ERC-7540 contract. `isOpen` = something is redeemable or in flight
+ * (max/pending/claimable > 0); there are no opens/closes-in-days (the exact
+ * maturity date is not on-chain).
+ *
+ * NOTE: `walletShares` is the balanceOf in the holder's wallet. ERC-7540
+ * requestRedeem escrows shares OUT of the wallet, so the holder's TOTAL
+ * position = walletShares + pending + claimable. fullyRedeemable compares
+ * maxRedeem against that total, not the (possibly depleted) wallet balance.
+ */
+export function resolveRedeemableActionPeriod(raw: RawRedeemability, walletShares: number, nav: number | null): ActionPeriod {
+  const totalPosition = walletShares + raw.pendingRedeemShares + raw.claimableRedeemShares;
+  const redeemable: Redeemable = {
+    maxRedeemShares: raw.maxRedeemShares,
+    maxRedeemValue: nav != null ? raw.maxRedeemShares * nav : null,
+    pendingRedeemShares: raw.pendingRedeemShares,
+    claimableRedeemShares: raw.claimableRedeemShares,
+    fullyRedeemable: totalPosition > 0 && raw.maxRedeemShares >= totalPosition,
+  };
+  const isOpen = raw.maxRedeemShares > 0 || raw.claimableRedeemShares > 0 || raw.pendingRedeemShares > 0;
+  return {
+    start: null, end: null, startTs: null, endTs: null, withdrawableDate: null,
+    source: 'onchain-redeemable',
+    isOpen,
+    opensInDays: null, closesInDays: null,
+    stale: false,
+    redeemable,
+  };
+}
+
