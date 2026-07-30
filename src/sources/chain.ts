@@ -166,7 +166,11 @@ export async function getVaultShares(sources: BalanceSource[], holder: string, r
   const errors: Array<{ chainId: number; error: string }> = [];
   results.forEach((r, i) => {
     if (r.status === 'fulfilled') ok.push(r.value);
-    else errors.push({ chainId: sources[i]!.chainId, error: String((r.reason as Error)?.message ?? r.reason) });
+    else {
+      const src = sources[i]!;
+      const msg = String((r.reason as Error)?.message ?? r.reason);
+      errors.push({ chainId: src.chainId, error: (msg && msg !== 'undefined') ? msg : `read failed for ${src.token} at ${src.rpcUrl}` });
+    }
   });
 
   const decimals = ok[0]?.decimals ?? sources[0]?.decimals ?? 18;

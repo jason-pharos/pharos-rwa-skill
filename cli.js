@@ -21213,6 +21213,9 @@ function fetchR25VaultPeriod(vaultId) {
 function fetchR25Positions(address, vaultId) {
   return r25Post("/portfolio/positions", { address, vaultId });
 }
+function fetchR25Activity(address, pageSize) {
+  return r25Post("/portfolio/activity", { address, pageSize: pageSize ?? 50 });
+}
 
 // node_modules/ethers/lib.esm/_version.js
 var version = "6.17.0";
@@ -39146,6 +39149,28 @@ function toR25HoldingInfo(h, positionsData, nowMs) {
   }
   return info;
 }
+function derivePositionsFromActivity(vaultId, items, totalShares, lockDays) {
+  const deposits = items.filter((i) => i.vaultId === vaultId && i.txType === "DEPOSIT");
+  if (deposits.length === 0) return null;
+  const totalDeposit = deposits.reduce((s, d) => s + Number(d.amount), 0);
+  if (totalDeposit <= 0) return null;
+  const lockMs = lockDays * 864e5;
+  const available = deposits.map((d) => ({
+    amountUsdc: d.amount,
+    shares: String(totalShares * (Number(d.amount) / totalDeposit)),
+    symbol: vaultId,
+    expirationDate: d.txTime + lockMs
+  }));
+  return {
+    availableCount: available.length,
+    withdrawalCount: 0,
+    available,
+    withdrawals: [],
+    totalBalance: totalShares,
+    redemptionFreezeWindow: 0
+    // ERC-4626 sync — no freeze
+  };
+}
 async function buildPositions(address, opts, errors) {
   const registry = await loadRegistry({ noRemote: opts.noRemote });
   const provider = providerFor(opts);
@@ -39171,11 +39196,34 @@ async function buildPositions(address, opts, errors) {
       }
     }
     if (r25Holdings) {
+      const missingPositions = [];
       for (const entry of registry) {
         if (!entry.r25VaultId || !r25Holdings.has(entry.r25VaultId)) continue;
         try {
           const pos = await fetchR25Positions(address, entry.r25VaultId);
-          if (pos) r25Positions.set(entry.r25VaultId, pos);
+          if (pos) {
+            r25Positions.set(entry.r25VaultId, pos);
+          } else {
+            missingPositions.push(entry.r25VaultId);
+          }
+        } catch {
+          missingPositions.push(entry.r25VaultId);
+        }
+      }
+      if (missingPositions.length > 0) {
+        try {
+          const activity = await fetchR25Activity(address);
+          if (activity && activity.data.length > 0) {
+            for (const vid of missingPositions) {
+              const entry = registry.find((e) => e.r25VaultId === vid);
+              const r25h = r25Holdings.get(vid);
+              if (!entry || !r25h) continue;
+              const lockDays = entry.redeemability?.lockDays;
+              if (!lockDays) continue;
+              const derived = derivePositionsFromActivity(vid, activity.data, Number(r25h.shares), lockDays);
+              if (derived) r25Positions.set(vid, derived);
+            }
+          }
         } catch {
         }
       }
@@ -39190,8 +39238,9 @@ async function buildPositions(address, opts, errors) {
       }
       const r25h = entry.r25VaultId ? r25Holdings?.get(entry.r25VaultId) : void 0;
       const hasR25PositionData = entry.r25VaultId ? r25Positions.has(entry.r25VaultId) : false;
+      const useR25ActionPeriod = hasR25PositionData && entry.redeemability?.async === true;
       let rawRedeem;
-      if (entry.redeemability && !hasR25PositionData) {
+      if (entry.redeemability && !useR25ActionPeriod) {
         try {
           rawRedeem = await getRedeemability(entry.redeemability.vault, address, entry.redeemability.requestId, entry.redeemability.shareDecimals, provider);
         } catch (e) {
@@ -39216,9 +39265,9 @@ async function buildPositions(address, opts, errors) {
         navResolvedFrom = result.navResolvedFrom;
       }
       let actionPeriod;
-      if (hasR25PositionData) {
+      if (useR25ActionPeriod) {
         const totalShares = r25h ? Number(r25h.shares) : Number(shares.totalHuman);
-        actionPeriod = resolveR25TrancheActionPeriod(r25Positions.get(entry.r25VaultId), totalShares, nav, entry.redeemability?.lockDays ?? 0, entry.redeemability?.async ?? false, now);
+        actionPeriod = resolveR25TrancheActionPeriod(r25Positions.get(entry.r25VaultId), totalShares, nav, entry.redeemability.lockDays, entry.redeemability.async, now);
       } else if (rawRedeem != null) {
         actionPeriod = resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability.lockDays, entry.redeemability.async);
       } else if (entry.r25VaultId && r25Periods.has(entry.r25VaultId)) {
@@ -39227,7 +39276,7 @@ async function buildPositions(address, opts, errors) {
         actionPeriod = resolveActionPeriod(entry, now);
       }
       let effectiveShares;
-      if (hasR25PositionData && r25h) {
+      if (useR25ActionPeriod && r25h) {
         effectiveShares = r25h.shares;
       } else {
         const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;

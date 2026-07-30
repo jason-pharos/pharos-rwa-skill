@@ -123,6 +123,22 @@ export interface R25Positions {
   redemptionFreezeWindow: number;  // ms
 }
 
+export interface R25ActivityItem {
+  vaultId: string;
+  txType: string;    // "DEPOSIT" | "WITHDRAW" | etc
+  amount: string;    // deposit asset amount (USDC for supported vaults)
+  txTime: number;    // ms epoch
+  status: string;
+}
+
+export interface R25ActivityResponse {
+  data: R25ActivityItem[];
+  pageNum: number;
+  pageSize: number;
+  total: number;
+  pages: number;
+}
+
 // ── Public API ──────────────────────────────────────────────────────
 
 /** All R25 vaults with TVL / APY. No address needed. */
@@ -157,4 +173,15 @@ export function fetchR25VaultCapacity(vaultId: string): Promise<R25VaultCapacity
  */
 export function fetchR25Positions(address: string, vaultId: string): Promise<R25Positions | null> {
   return r25Post('/portfolio/positions', { address, vaultId });
+}
+
+/**
+ * All portfolio activity (deposits, withdrawals) across every vault. Used as
+ * a fallback source for vaults where `/portfolio/positions` returns
+ * "Unsupported vault" (VRPCW). Each deposit record includes the amount and
+ * timestamp, from which per-tranche unlock dates can be derived (see
+ * `deriveVRPCWTranches` in index.ts).
+ */
+export function fetchR25Activity(address: string, pageSize?: number): Promise<R25ActivityResponse | null> {
+  return r25Post('/portfolio/activity', { address, pageSize: pageSize ?? 50 });
 }

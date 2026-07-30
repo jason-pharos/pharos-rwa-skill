@@ -9,6 +9,7 @@ export interface BalanceSource {
   chainId: number;
   rpcUrlEnv?: string;          // env var name to override rpcUrl (e.g. ETHEREUM_RPC_URL)
   rpcUrl: string;              // default RPC for this chain
+  rpcUrlFallbacks?: string[];  // fallback RPCs tried in order when primary fails
   token: string;               // ERC20 whose balanceOf = user shares on this chain
   decimals?: number;           // if omitted, read on-chain
 }

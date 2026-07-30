@@ -1,7 +1,7 @@
 import type { AdviceBundle, Envelope, Position, R25HoldingInfo, UpdateInfo, VaultMarket, VaultRegistryEntry } from './types.ts';
 import { loadRegistry } from './config/remoteConfig.ts';
 import { fetchHarbor } from './sources/harbor.ts';
-import { fetchR25VaultList, fetchR25Holdings, fetchR25VaultPeriod, fetchR25Positions, type R25HoldingItem, type R25VaultPeriod, type R25Positions } from './sources/r25.ts';
+import { fetchR25VaultList, fetchR25Holdings, fetchR25VaultPeriod, fetchR25Positions, fetchR25Activity, type R25HoldingItem, type R25VaultPeriod, type R25Positions, type R25ActivityItem } from './sources/r25.ts';
 import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getVaultNavOnchain, getRedeemability, type RawRedeemability } from './sources/chain.ts';
 import { resolveActionPeriod, resolveRedeemableActionPeriod, resolveR25ActionPeriod, resolveR25TrancheActionPeriod } from './logic/actionPeriod.ts';
 import { computePosition } from './logic/position.ts';
@@ -125,6 +125,42 @@ function toR25HoldingInfo(h: R25HoldingItem, positionsData?: R25Positions | null
   return info;
 }
 
+/**
+ * Derive per-deposit tranches from portfolio activity data for vaults whose
+ * `/portfolio/positions` API returns "Unsupported vault" (VRPCW).
+ * Allocates total shares proportionally by deposit amount and computes
+ * lock-end dates as deposit time + lockDays.
+ */
+function derivePositionsFromActivity(
+  vaultId: string,
+  items: R25ActivityItem[],
+  totalShares: number,
+  lockDays: number,
+): R25Positions | null {
+  const deposits = items.filter((i) => i.vaultId === vaultId && i.txType === 'DEPOSIT');
+  if (deposits.length === 0) return null;
+
+  const totalDeposit = deposits.reduce((s, d) => s + Number(d.amount), 0);
+  if (totalDeposit <= 0) return null;
+
+  const lockMs = lockDays * 86400000;
+  const available = deposits.map((d) => ({
+    amountUsdc: d.amount,
+    shares: String(totalShares * (Number(d.amount) / totalDeposit)),
+    symbol: vaultId,
+    expirationDate: d.txTime + lockMs,
+  }));
+
+  return {
+    availableCount: available.length,
+    withdrawalCount: 0,
+    available,
+    withdrawals: [],
+    totalBalance: totalShares,
+    redemptionFreezeWindow: 0, // ERC-4626 sync — no freeze
+  };
+}
+
 async function buildPositions(address: string, opts: RunOpts, errors: Envelope<unknown>['errors']): Promise<Position[]> {
   const registry = await loadRegistry({ noRemote: opts.noRemote });
   const provider = providerFor(opts);
@@ -154,14 +190,40 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
     }
 
     // Fetch per-tranche positions for R25 vaults the user holds.
-    // VRPCW returns "Unsupported vault" → null (graceful skip).
+    // VRPCW returns "Unsupported vault" — fall back to activity-derived
+    // tranches using deposit records from /portfolio/activity.
     if (r25Holdings) {
+      const missingPositions: string[] = [];
       for (const entry of registry) {
         if (!entry.r25VaultId || !r25Holdings.has(entry.r25VaultId)) continue;
         try {
           const pos = await fetchR25Positions(address, entry.r25VaultId);
-          if (pos) r25Positions.set(entry.r25VaultId, pos);
-        } catch { /* tranche data is optional */ }
+          if (pos) {
+            r25Positions.set(entry.r25VaultId, pos);
+          } else {
+            missingPositions.push(entry.r25VaultId);
+          }
+        } catch {
+          missingPositions.push(entry.r25VaultId);
+        }
+      }
+      // Fall back to activity-derived tranches for vaults without positions
+      // API support (VRPCW).
+      if (missingPositions.length > 0) {
+        try {
+          const activity = await fetchR25Activity(address);
+          if (activity && activity.data.length > 0) {
+            for (const vid of missingPositions) {
+              const entry = registry.find((e) => e.r25VaultId === vid);
+              const r25h = r25Holdings.get(vid);
+              if (!entry || !r25h) continue;
+              const lockDays = entry.redeemability?.lockDays;
+              if (!lockDays) continue;
+              const derived = derivePositionsFromActivity(vid, activity.data, Number(r25h.shares), lockDays);
+              if (derived) r25Positions.set(vid, derived);
+            }
+          }
+        } catch { /* activity is best-effort */ }
       }
     }
   }
@@ -181,13 +243,19 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
       // R25 holdings for this vault (undefined if not an R25 vault or no data).
       const r25h = entry.r25VaultId ? r25Holdings?.get(entry.r25VaultId) : undefined;
       const hasR25PositionData = entry.r25VaultId ? r25Positions.has(entry.r25VaultId) : false;
+      // ERC-7540 async vaults (VRPCS): R25 positions data overrides on-chain
+      // maxRedeem which is misleading (returns only first settlement window).
+      // ERC-4626 sync vaults (APC3M, VRPCW): on-chain maxRedeem is correct;
+      // R25 positions/tranches are for display only.
+      const useR25ActionPeriod = hasR25PositionData && (entry.redeemability?.async === true);
 
       // Redeemability (ERC-7540, VRPC-SemiYearly): read BEFORE the zero-balance
-      // skip. SKIP the on-chain read when R25 positions data is available — the API
-      // is authoritative for withdrawal eligibility (maxRedeem on-chain is misleading
-      // for ERC-7540, returning only the first settlement window's shares).
+      // skip. SKIP the on-chain read when R25 positions data is available for
+      // ERC-7540 async vaults — the API is authoritative for withdrawal eligibility
+      // (maxRedeem on-chain is misleading for ERC-7540, returning only the first
+      // settlement window's shares).
       let rawRedeem: RawRedeemability | undefined;
-      if (entry.redeemability && !hasR25PositionData) {
+      if (entry.redeemability && !useR25ActionPeriod) {
         try {
           rawRedeem = await getRedeemability(entry.redeemability.vault, address, entry.redeemability.requestId, entry.redeemability.shareDecimals, provider);
         } catch (e) {
@@ -218,13 +286,13 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
         navResolvedFrom = result.navResolvedFrom;
       }
 
-      // Action period: R25 positions/tranche data first (all non-expired shares
-      // requestable); else on-chain redeemability; else R25 period API for
-      // WINDOWED vaults (APC3M); else config dates.
+      // Action period: R25 positions/tranche data for ERC-7540 async vaults
+      // (all non-expired shares requestable); else on-chain redeemability; else
+      // R25 period API for WINDOWED vaults (APC3M); else config dates.
       let actionPeriod;
-      if (hasR25PositionData) {
+      if (useR25ActionPeriod) {
         const totalShares = r25h ? Number(r25h.shares) : Number(shares.totalHuman);
-        actionPeriod = resolveR25TrancheActionPeriod(r25Positions.get(entry.r25VaultId!)!, totalShares, nav, entry.redeemability?.lockDays ?? 0, entry.redeemability?.async ?? false, now);
+        actionPeriod = resolveR25TrancheActionPeriod(r25Positions.get(entry.r25VaultId!)!, totalShares, nav, entry.redeemability!.lockDays, entry.redeemability!.async, now);
       } else if (rawRedeem != null) {
         actionPeriod = resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability!.lockDays, entry.redeemability!.async);
       } else if (entry.r25VaultId && r25Periods.has(entry.r25VaultId)) {
@@ -236,10 +304,10 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
       // For ERC-7540 vaults, requestRedeem escrows shares OUT of the wallet, so
       // the holder's TOTAL position = wallet shares + escrowed (pending +
       // claimable). Use that total for value/principal so a mid-redemption
-      // position isn't understated. When R25 positions data is available, use
-      // the R25 total shares (includes all tranches).
+      // position isn't understated. When R25 positions data is available for
+      // ERC-7540 async vaults, use the R25 total shares (includes all tranches).
       let effectiveShares: string;
-      if (hasR25PositionData && r25h) {
+      if (useR25ActionPeriod && r25h) {
         effectiveShares = r25h.shares;
       } else {
         const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;
