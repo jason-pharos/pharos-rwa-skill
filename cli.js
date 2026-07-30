@@ -38781,6 +38781,33 @@ function resolveRedeemableActionPeriod(raw, walletShares, nav, lockDays, isAsync
     redeemable
   };
 }
+function resolveR25TrancheActionPeriod(positions, totalShares, nav, lockDays, isAsync, nowSec2) {
+  const nowMs = nowSec2 * 1e3;
+  const nonExpiredShares = positions.available.filter((t) => t.expirationDate > nowMs).reduce((s, t) => s + Number(t.shares), 0);
+  const redeemable = {
+    maxRedeemShares: nonExpiredShares,
+    maxRedeemValue: nav != null ? nonExpiredShares * nav : null,
+    pendingRedeemShares: 0,
+    claimableRedeemShares: 0,
+    fullyRedeemable: totalShares > 0 && nonExpiredShares >= totalShares,
+    lockDays,
+    async: isAsync
+  };
+  const isOpen = nonExpiredShares > 0;
+  return {
+    start: null,
+    end: null,
+    startTs: null,
+    endTs: null,
+    withdrawableDate: null,
+    source: "r25-api",
+    isOpen,
+    opensInDays: null,
+    closesInDays: null,
+    stale: false,
+    redeemable
+  };
+}
 
 // src/logic/position.ts
 var SECONDS_PER_YEAR = 31557600;
@@ -38896,11 +38923,11 @@ async function fetchEmberPositionValue(address, vaultId) {
 
 // src/logic/reminders.ts
 function classify(ap) {
-  if (ap.source === "onchain-redeemable") {
+  if (ap.redeemable) {
     const r = ap.redeemable;
-    if (r && r.claimableRedeemShares > 0) return "claimable";
-    if (r && r.maxRedeemShares > 0) return "redeemable";
-    if (r && r.pendingRedeemShares > 0) return "pending";
+    if (r.claimableRedeemShares > 0) return "claimable";
+    if (r.maxRedeemShares > 0) return "redeemable";
+    if (r.pendingRedeemShares > 0) return "pending";
     return "locked";
   }
   if (ap.source === "unavailable") return "unknown";
@@ -38924,6 +38951,7 @@ function trancheNote(tranches) {
 function messageFor(vault, u, ap, tranches) {
   const r = ap.redeemable;
   const tn = trancheNote(tranches);
+  const isR25 = ap.source === "r25-api";
   switch (u) {
     case "closing-soon":
       return `${vault}: withdraw window closes in ${ap.closesInDays} day(s).`;
@@ -38938,10 +38966,12 @@ function messageFor(vault, u, ap, tranches) {
     case "claimable":
       return `${vault}: ${fmt(r?.claimableRedeemShares ?? 0)} share(s) have settled and can be claimed now.${tn}`;
     case "redeemable":
+      if (isR25) return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are requestable for withdrawal now (all non-expired tranche shares).${tn}`;
       return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (${r?.lockDays ?? "?"}-day term).${tn}`;
     case "pending":
       return `${vault}: a withdraw request for ${fmt(r?.pendingRedeemShares ?? 0)} share(s) is submitted and awaiting settlement.${tn}`;
     case "locked":
+      if (isR25) return `${vault}: no non-expired shares available for withdrawal.${tn}`;
       return `${vault}: nothing redeemable right now (locked). Funds unlock ~${r?.lockDays ?? "?"} days after deposit${r?.async ? "; submit a withdraw request ahead of maturity" : ""}.${tn}`;
     default:
       return `${vault}: action period unavailable.`;
@@ -39158,8 +39188,10 @@ async function buildPositions(address, opts, errors) {
       for (const be of shares.errors) {
         errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
       }
+      const r25h = entry.r25VaultId ? r25Holdings?.get(entry.r25VaultId) : void 0;
+      const hasR25PositionData = entry.r25VaultId ? r25Positions.has(entry.r25VaultId) : false;
       let rawRedeem;
-      if (entry.redeemability) {
+      if (entry.redeemability && !hasR25PositionData) {
         try {
           rawRedeem = await getRedeemability(entry.redeemability.vault, address, entry.redeemability.requestId, entry.redeemability.shareDecimals, provider);
         } catch (e) {
@@ -39167,7 +39199,6 @@ async function buildPositions(address, opts, errors) {
         }
       }
       const hasRedeemActivity = rawRedeem != null && (rawRedeem.pendingRedeemShares > 0 || rawRedeem.claimableRedeemShares > 0 || rawRedeem.maxRedeemShares > 0);
-      const r25h = entry.r25VaultId ? r25Holdings?.get(entry.r25VaultId) : void 0;
       if (shares.totalRaw === 0n && !hasRedeemActivity && !r25h) return;
       let nav;
       let apy;
@@ -39185,15 +39216,23 @@ async function buildPositions(address, opts, errors) {
         navResolvedFrom = result.navResolvedFrom;
       }
       let actionPeriod;
-      if (rawRedeem != null) {
+      if (hasR25PositionData) {
+        const totalShares = r25h ? Number(r25h.shares) : Number(shares.totalHuman);
+        actionPeriod = resolveR25TrancheActionPeriod(r25Positions.get(entry.r25VaultId), totalShares, nav, entry.redeemability?.lockDays ?? 0, entry.redeemability?.async ?? false, now);
+      } else if (rawRedeem != null) {
         actionPeriod = resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability.lockDays, entry.redeemability.async);
       } else if (entry.r25VaultId && r25Periods.has(entry.r25VaultId)) {
         actionPeriod = resolveR25ActionPeriod(r25Periods.get(entry.r25VaultId), now);
       } else {
         actionPeriod = resolveActionPeriod(entry, now);
       }
-      const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;
-      const effectiveShares = (Number(shares.totalHuman) + escrowedShares).toString();
+      let effectiveShares;
+      if (hasR25PositionData && r25h) {
+        effectiveShares = r25h.shares;
+      } else {
+        const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;
+        effectiveShares = (Number(shares.totalHuman) + escrowedShares).toString();
+      }
       const common = { entry, sharesHuman: effectiveShares, nav, apy, actionPeriod, now, navResolvedFrom };
       if (entry.emberVaultId) {
         try {

@@ -16,11 +16,12 @@ function classify(ap: Position['actionPeriod']): Urgency {
   // Redeemability-based vaults (no fixed dates): urgency from live amounts,
   // most-actionable first: claimable (settled) > redeemable (can request now)
   // > pending (already requested, awaiting settlement) > locked.
-  if (ap.source === 'onchain-redeemable') {
+  // Covers both 'onchain-redeemable' and 'r25-api' with tranche data.
+  if (ap.redeemable) {
     const r = ap.redeemable;
-    if (r && r.claimableRedeemShares > 0) return 'claimable';
-    if (r && r.maxRedeemShares > 0) return 'redeemable';
-    if (r && r.pendingRedeemShares > 0) return 'pending';
+    if (r.claimableRedeemShares > 0) return 'claimable';
+    if (r.maxRedeemShares > 0) return 'redeemable';
+    if (r.pendingRedeemShares > 0) return 'pending';
     return 'locked';
   }
   if (ap.source === 'unavailable') return 'unknown';
@@ -48,6 +49,7 @@ function trancheNote(tranches: R25Tranche[] | undefined): string {
 function messageFor(vault: VaultId, u: Urgency, ap: Position['actionPeriod'], tranches?: R25Tranche[]): string {
   const r = ap.redeemable;
   const tn = trancheNote(tranches);
+  const isR25 = ap.source === 'r25-api';
   switch (u) {
     case 'closing-soon': return `${vault}: withdraw window closes in ${ap.closesInDays} day(s).`;
     case 'open': return `${vault}: withdraw window is open now.`;
@@ -55,9 +57,13 @@ function messageFor(vault: VaultId, u: Urgency, ap: Position['actionPeriod'], tr
     case 'future': return `${vault}: withdraw window opens in ${ap.opensInDays} day(s).`;
     case 'closed': return `${vault}: last known withdraw window has passed; config may be stale.`;
     case 'claimable': return `${vault}: ${fmt(r?.claimableRedeemShares ?? 0)} share(s) have settled and can be claimed now.${tn}`;
-    case 'redeemable': return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (${r?.lockDays ?? '?'}-day term).${tn}`;
+    case 'redeemable':
+      if (isR25) return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are requestable for withdrawal now (all non-expired tranche shares).${tn}`;
+      return `${vault}: ${fmt(r?.maxRedeemShares ?? 0)} share(s) are redeemable now; the rest is still locked (${r?.lockDays ?? '?'}-day term).${tn}`;
     case 'pending': return `${vault}: a withdraw request for ${fmt(r?.pendingRedeemShares ?? 0)} share(s) is submitted and awaiting settlement.${tn}`;
-    case 'locked': return `${vault}: nothing redeemable right now (locked). Funds unlock ~${r?.lockDays ?? '?'} days after deposit${r?.async ? '; submit a withdraw request ahead of maturity' : ''}.${tn}`;
+    case 'locked':
+      if (isR25) return `${vault}: no non-expired shares available for withdrawal.${tn}`;
+      return `${vault}: nothing redeemable right now (locked). Funds unlock ~${r?.lockDays ?? '?'} days after deposit${r?.async ? '; submit a withdraw request ahead of maturity' : ''}.${tn}`;
     default: return `${vault}: action period unavailable.`;
   }
 }

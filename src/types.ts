@@ -113,7 +113,7 @@ export interface ActionPeriod {
   opensInDays: number | null;
   closesInDays: number | null;
   stale: boolean;              // true if config window fully in the past
-  /** Present only when source === 'onchain-redeemable' (VRPC-SemiYearly). */
+  /** Present when source is 'onchain-redeemable' or 'r25-api' with tranche data. */
   redeemable?: Redeemable;
 }
 

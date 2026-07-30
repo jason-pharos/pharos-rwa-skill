@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveActionPeriod, resolveRedeemableActionPeriod } from '../src/logic/actionPeriod.ts';
+import { resolveActionPeriod, resolveRedeemableActionPeriod, resolveR25TrancheActionPeriod } from '../src/logic/actionPeriod.ts';
 
 const apc = {
   id: 'APC3M',
@@ -103,4 +103,96 @@ test('redeemable: fullyRedeemable uses wallet+escrowed as denominator', () => {
   assert.equal(ap.redeemable.fullyRedeemable, false); // 60 < 100 total
   // claimable present → still open
   assert.equal(ap.isOpen, true);
+});
+
+// ── R25 tranche-based action period ──
+
+/** Build an R25Positions-like object for testing. */
+function makeR25Positions(available, redemptionFreezeWindow) {
+  return {
+    availableCount: available.length,
+    withdrawalCount: 0,
+    available,
+    withdrawals: [],
+    totalBalance: available.reduce((s, t) => s + Number(t.shares), 0),
+    redemptionFreezeWindow,
+  };
+}
+
+function makeTranche(shares, expirationDateMs) {
+  return {
+    shares: String(shares),
+    amountUsdc: String(shares),
+    symbol: 'USDC',
+    expirationDate: expirationDateMs,
+  };
+}
+
+const nowSec = Math.floor(Date.parse('2026-11-25T00:00:00Z') / 1000);
+const day = 86400000;
+
+test('r25-tranche: non-expired shares are all requestable (VRPCS 3 tranches)', () => {
+  // 3 tranches: expiring 2026-11-30, 2026-12-05, 2026-12-10 (all > now)
+  const positions = makeR25Positions([
+    makeTranche(12976.25, Date.parse('2026-11-30T00:00:00Z')),
+    makeTranche(22340, Date.parse('2026-12-05T00:00:00Z')),
+    makeTranche(22340, Date.parse('2026-12-10T00:00:00Z')),
+  ], 604800000);
+  const totalShares = 57656.25;
+  const ap = resolveR25TrancheActionPeriod(positions, totalShares, 1.0283, 184, true, nowSec);
+
+  assert.equal(ap.source, 'r25-api');
+  assert.equal(ap.isOpen, true);
+  assert.equal(ap.stale, false);
+  assert.equal(ap.redeemable.maxRedeemShares, 57656.25);
+  assert.ok(Math.abs(ap.redeemable.maxRedeemValue - 57656.25 * 1.0283) < 1e-6);
+  assert.equal(ap.redeemable.fullyRedeemable, true); // all shares non-expired
+  assert.equal(ap.redeemable.lockDays, 184);
+  assert.equal(ap.redeemable.async, true);
+});
+
+test('r25-tranche: expired tranche excluded from maxRedeem', () => {
+  // 1 expired (2026-11-01), 2 non-expired
+  const positions = makeR25Positions([
+    makeTranche(12976.25, Date.parse('2026-11-01T00:00:00Z')), // expired
+    makeTranche(22340, Date.parse('2026-12-05T00:00:00Z')),
+    makeTranche(22340, Date.parse('2026-12-10T00:00:00Z')),
+  ], 604800000);
+  const totalShares = 57656.25;
+  const ap = resolveR25TrancheActionPeriod(positions, totalShares, 1.0283, 184, true, nowSec);
+
+  assert.equal(ap.redeemable.maxRedeemShares, 44680); // 22340 + 22340
+  assert.equal(ap.redeemable.fullyRedeemable, false); // 44680 < 57656.25
+  assert.equal(ap.isOpen, true);
+});
+
+test('r25-tranche: all expired → not open, locked', () => {
+  const positions = makeR25Positions([
+    makeTranche(12976.25, Date.parse('2026-11-01T00:00:00Z')),
+  ], 604800000);
+  const ap = resolveR25TrancheActionPeriod(positions, 12976.25, 1.0, 184, true, nowSec);
+
+  assert.equal(ap.redeemable.maxRedeemShares, 0);
+  assert.equal(ap.isOpen, false);
+  assert.equal(ap.redeemable.fullyRedeemable, false);
+});
+
+test('r25-tranche: null nav → null maxRedeemValue', () => {
+  const positions = makeR25Positions([
+    makeTranche(100, Date.parse('2026-12-10T00:00:00Z')),
+  ], 0);
+  const ap = resolveR25TrancheActionPeriod(positions, 100, null, 7, false, nowSec);
+
+  assert.equal(ap.redeemable.maxRedeemValue, null);
+  assert.equal(ap.redeemable.lockDays, 7);
+  assert.equal(ap.redeemable.async, false);
+});
+
+test('r25-tranche: empty available → no shares requestable', () => {
+  const positions = makeR25Positions([], 0);
+  const ap = resolveR25TrancheActionPeriod(positions, 0, 1.0, 184, true, nowSec);
+
+  assert.equal(ap.redeemable.maxRedeemShares, 0);
+  assert.equal(ap.isOpen, false);
+  assert.equal(ap.redeemable.fullyRedeemable, false);
 });

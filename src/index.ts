@@ -3,7 +3,7 @@ import { loadRegistry } from './config/remoteConfig.ts';
 import { fetchHarbor } from './sources/harbor.ts';
 import { fetchR25VaultList, fetchR25Holdings, fetchR25VaultPeriod, fetchR25Positions, type R25HoldingItem, type R25VaultPeriod, type R25Positions } from './sources/r25.ts';
 import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getVaultNavOnchain, getRedeemability, type RawRedeemability } from './sources/chain.ts';
-import { resolveActionPeriod, resolveRedeemableActionPeriod, resolveR25ActionPeriod } from './logic/actionPeriod.ts';
+import { resolveActionPeriod, resolveRedeemableActionPeriod, resolveR25ActionPeriod, resolveR25TrancheActionPeriod } from './logic/actionPeriod.ts';
 import { computePosition } from './logic/position.ts';
 import { computePAlphaPosition } from './logic/position-palpha.ts';
 import { fetchEmberPositionValue } from './sources/ember.ts';
@@ -178,13 +178,16 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
         errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
       }
 
+      // R25 holdings for this vault (undefined if not an R25 vault or no data).
+      const r25h = entry.r25VaultId ? r25Holdings?.get(entry.r25VaultId) : undefined;
+      const hasR25PositionData = entry.r25VaultId ? r25Positions.has(entry.r25VaultId) : false;
+
       // Redeemability (ERC-7540, VRPC-SemiYearly): read BEFORE the zero-balance
-      // skip. requestRedeem escrows shares OUT of the wallet, so a holder mid
-      // redemption can have wallet balance 0 while still having pending/claimable
-      // shares — we must not drop that position. rawRedeem is undefined on read
-      // failure (recorded as an error) vs. all-zero on a genuine lock.
+      // skip. SKIP the on-chain read when R25 positions data is available — the API
+      // is authoritative for withdrawal eligibility (maxRedeem on-chain is misleading
+      // for ERC-7540, returning only the first settlement window's shares).
       let rawRedeem: RawRedeemability | undefined;
-      if (entry.redeemability) {
+      if (entry.redeemability && !hasR25PositionData) {
         try {
           rawRedeem = await getRedeemability(entry.redeemability.vault, address, entry.redeemability.requestId, entry.redeemability.shareDecimals, provider);
         } catch (e) {
@@ -193,9 +196,6 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
       }
       const hasRedeemActivity = rawRedeem != null
         && (rawRedeem.pendingRedeemShares > 0 || rawRedeem.claimableRedeemShares > 0 || rawRedeem.maxRedeemShares > 0);
-
-      // R25 holdings for this vault (undefined if not an R25 vault or no data).
-      const r25h = entry.r25VaultId ? r25Holdings?.get(entry.r25VaultId) : undefined;
 
       if (shares.totalRaw === 0n && !hasRedeemActivity && !r25h) return; // truly nothing to report
 
@@ -218,10 +218,14 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
         navResolvedFrom = result.navResolvedFrom;
       }
 
-      // Action period: redeemability-based reads live from the contract;
-      // R25 period API for WINDOWED vaults (APC3M); config dates otherwise.
+      // Action period: R25 positions/tranche data first (all non-expired shares
+      // requestable); else on-chain redeemability; else R25 period API for
+      // WINDOWED vaults (APC3M); else config dates.
       let actionPeriod;
-      if (rawRedeem != null) {
+      if (hasR25PositionData) {
+        const totalShares = r25h ? Number(r25h.shares) : Number(shares.totalHuman);
+        actionPeriod = resolveR25TrancheActionPeriod(r25Positions.get(entry.r25VaultId!)!, totalShares, nav, entry.redeemability?.lockDays ?? 0, entry.redeemability?.async ?? false, now);
+      } else if (rawRedeem != null) {
         actionPeriod = resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability!.lockDays, entry.redeemability!.async);
       } else if (entry.r25VaultId && r25Periods.has(entry.r25VaultId)) {
         actionPeriod = resolveR25ActionPeriod(r25Periods.get(entry.r25VaultId)!, now);
@@ -232,9 +236,15 @@ async function buildPositions(address: string, opts: RunOpts, errors: Envelope<u
       // For ERC-7540 vaults, requestRedeem escrows shares OUT of the wallet, so
       // the holder's TOTAL position = wallet shares + escrowed (pending +
       // claimable). Use that total for value/principal so a mid-redemption
-      // position isn't understated.
-      const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;
-      const effectiveShares = (Number(shares.totalHuman) + escrowedShares).toString();
+      // position isn't understated. When R25 positions data is available, use
+      // the R25 total shares (includes all tranches).
+      let effectiveShares: string;
+      if (hasR25PositionData && r25h) {
+        effectiveShares = r25h.shares;
+      } else {
+        const escrowedShares = rawRedeem != null ? rawRedeem.pendingRedeemShares + rawRedeem.claimableRedeemShares : 0;
+        effectiveShares = (Number(shares.totalHuman) + escrowedShares).toString();
+      }
 
       const common = { entry, sharesHuman: effectiveShares, nav, apy, actionPeriod, now, navResolvedFrom };
 

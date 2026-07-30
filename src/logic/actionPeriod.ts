@@ -1,6 +1,6 @@
 import type { ActionPeriod, Redeemable, VaultRegistryEntry } from '../types.ts';
 import type { RawRedeemability } from '../sources/chain.ts';
-import type { R25VaultPeriod } from '../sources/r25.ts';
+import type { R25VaultPeriod, R25Positions } from '../sources/r25.ts';
 import { isoToSec, secToIso, windowState } from '../util/time.ts';
 
 function build(startTs: number | null, endTs: number | null, withdrawableTs: number | null, source: ActionPeriod['source'], now: number): ActionPeriod {
@@ -79,6 +79,45 @@ export function resolveRedeemableActionPeriod(raw: RawRedeemability, walletShare
   return {
     start: null, end: null, startTs: null, endTs: null, withdrawableDate: null,
     source: 'onchain-redeemable',
+    isOpen,
+    opensInDays: null, closesInDays: null,
+    stale: false,
+    redeemable,
+  };
+}
+
+/**
+ * R25-API-tranche-based action period (VRPCS / APC3M when R25 positions data
+ * is available). All non-expired available tranche shares are requestable —
+ * unlike the on-chain `maxRedeem` which only returns one settlement window's
+ * worth. Falls back to on-chain or config when R25 data is absent.
+ */
+export function resolveR25TrancheActionPeriod(
+  positions: R25Positions,
+  totalShares: number,
+  nav: number | null,
+  lockDays: number,
+  isAsync: boolean,
+  nowSec: number,
+): ActionPeriod {
+  const nowMs = nowSec * 1000;
+  const nonExpiredShares = positions.available
+    .filter((t) => t.expirationDate > nowMs)
+    .reduce((s, t) => s + Number(t.shares), 0);
+
+  const redeemable: Redeemable = {
+    maxRedeemShares: nonExpiredShares,
+    maxRedeemValue: nav != null ? nonExpiredShares * nav : null,
+    pendingRedeemShares: 0,
+    claimableRedeemShares: 0,
+    fullyRedeemable: totalShares > 0 && nonExpiredShares >= totalShares,
+    lockDays,
+    async: isAsync,
+  };
+  const isOpen = nonExpiredShares > 0;
+  return {
+    start: null, end: null, startTs: null, endTs: null, withdrawableDate: null,
+    source: 'r25-api',
     isOpen,
     opensInDays: null, closesInDays: null,
     stale: false,
