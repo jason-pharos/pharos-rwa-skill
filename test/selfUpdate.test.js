@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -107,5 +107,74 @@ test('a missing SKILL.md.sha256 asset aborts rather than skipping verification',
   try {
     await assert.rejects(() => selfUpdate({ targetPath: cliPath }));
     assert.equal(readFileSync(cliPath, 'utf8'), 'old cli');
+  } finally { restore(); }
+});
+
+/**
+ * `upgraded` used to be hard-coded true, so running `upgrade` on an
+ * already-current install still reported success — which is how an agent came
+ * to tell the user "0.1.0 → latest 更新完成" when nothing had changed. It has to
+ * reflect whether anything was actually replaced.
+ */
+test('an already-current install reports upgraded false and writes nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'selfupdate-'));
+  const cliPath = join(dir, 'cli.js');
+  const skillPath = join(dir, 'SKILL.md');
+  writeFileSync(cliPath, 'same cli');
+  writeFileSync(skillPath, 'same skill');
+  const mtimeBefore = statSync(cliPath).mtimeMs;
+
+  const restore = stubFetch(releaseBodies('same cli', 'same skill'));
+  try {
+    const r = await selfUpdate({ targetPath: cliPath });
+    assert.equal(r.upgraded, false, 'nothing changed, so nothing was upgraded');
+    assert.deepEqual(r.files, [], 'no files were replaced');
+    assert.equal(statSync(cliPath).mtimeMs, mtimeBefore, 'an unchanged file must not be rewritten');
+    assert.deepEqual(readdirSync(dir).sort(), ['SKILL.md', 'cli.js'], 'no temp files left behind');
+  } finally { restore(); }
+});
+
+test('only the file that actually differs is replaced', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'selfupdate-'));
+  const cliPath = join(dir, 'cli.js');
+  const skillPath = join(dir, 'SKILL.md');
+  writeFileSync(cliPath, 'old cli');
+  writeFileSync(skillPath, 'same skill');
+
+  const restore = stubFetch(releaseBodies('new cli', 'same skill'));
+  try {
+    const r = await selfUpdate({ targetPath: cliPath });
+    assert.equal(r.upgraded, true);
+    assert.deepEqual(r.files, ['cli.js'], 'SKILL.md was already current');
+    assert.equal(readFileSync(cliPath, 'utf8'), 'new cli');
+  } finally { restore(); }
+});
+
+test('`to` reports the resolved release version, not the string "latest"', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'selfupdate-'));
+  const cliPath = join(dir, 'cli.js');
+  writeFileSync(cliPath, 'old cli');
+
+  const bodies = releaseBodies('new cli');
+  bodies[`${BASE}/VERSION`] = 'v0.3.0\n';
+  const restore = stubFetch(bodies);
+  try {
+    const r = await selfUpdate({ targetPath: cliPath });
+    assert.equal(r.to, 'v0.3.0', `expected the real tag, got ${JSON.stringify(r.to)}`);
+  } finally { restore(); }
+});
+
+test('`to` degrades to "latest" when the release exposes no version marker', async () => {
+  // Older releases have no VERSION asset; the upgrade must still work rather
+  // than failing over a cosmetic field.
+  const dir = mkdtempSync(join(tmpdir(), 'selfupdate-'));
+  const cliPath = join(dir, 'cli.js');
+  writeFileSync(cliPath, 'old cli');
+
+  const restore = stubFetch(releaseBodies('new cli'));
+  try {
+    const r = await selfUpdate({ targetPath: cliPath });
+    assert.equal(r.upgraded, true);
+    assert.equal(r.to, 'latest');
   } finally { restore(); }
 });

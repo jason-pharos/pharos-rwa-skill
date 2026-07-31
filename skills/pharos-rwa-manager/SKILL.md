@@ -24,37 +24,45 @@ Zero-dependency CLI to inspect Pharos RWA vault positions and market data. Outpu
 
 ## How to use / 如何使用
 
+**Always invoke the CLI by its absolute path** — `node /absolute/path/to/cli.js <command>` — or, if your shell tool takes a working directory, pass the skill directory as an absolute `workdir`. Do NOT rely on a relative `cd` into the skill directory: some agent shell tools mangle a leading-dot path segment (a `.hermes/skills/...` path has been observed becoming `cd hermes`, failing with exit 126 before the command ever runs). The examples below use `$SKILL_DIR` for that absolute path.
+
+```bash
+SKILL_DIR=/absolute/path/to/pharos-rwa-manager   # the directory holding cli.js
+```
+
 Market overview of all vaults (no address needed):
 
 ```bash
-node cli.js vaults
+node "$SKILL_DIR/cli.js" vaults
 ```
 
 A user's position overview (APC3M + pALPHA + VRPC-SemiYearly + VRPC-Weekly):
 
 ```bash
-node cli.js position 0xYourAddress
+node "$SKILL_DIR/cli.js" position 0xYourAddress
 ```
 
 Action-period reminders (which vaults can be withdrawn soon):
 
 ```bash
-node cli.js reminders 0xYourAddress
+node "$SKILL_DIR/cli.js" reminders 0xYourAddress
 ```
 
 Advice bundle (market + position + vaults the user does not yet hold):
 
 ```bash
-node cli.js advise 0xYourAddress
+node "$SKILL_DIR/cli.js" advise 0xYourAddress
 ```
 
 Self-update the CLI from the latest GitHub Release:
 
 ```bash
-node cli.js upgrade
+node "$SKILL_DIR/cli.js" upgrade
 ```
 
 Add `--pretty` to any command for indented JSON. Add `--no-remote` to skip remote config and version checks (offline).
+
+Each command finishes in a few seconds normally. Allow at least 30 seconds before treating one as hung: when the R25 API is unreachable, R25-backed vaults wait out an 8-second deadline and then degrade to on-chain reads (the reason lands in `errors[]` as an `r25` entry) rather than failing.
 
 ## Wallet addresses / 钱包地址
 
@@ -90,7 +98,7 @@ Recommended daily job, per tracked user address:
   period 即将开启/进行中/即将关闭时主动提醒用户。
 
   ```bash
-  node cli.js reminders 0xUserAddress
+  node "$SKILL_DIR/cli.js" reminders 0xUserAddress
   ```
 
 - **Latest vault info + buy advice** — run `vaults` (market-wide, no address)
@@ -99,7 +107,7 @@ Recommended daily job, per tracked user address:
   it is worth buying. 每日收集最新金库信息，出现新机会时提示是否值得买入。
 
   ```bash
-  node cli.js advise 0xUserAddress
+  node "$SKILL_DIR/cli.js" advise 0xUserAddress
   ```
 
 Only notify the user when there is something actionable (an urgency worth
@@ -107,9 +115,11 @@ acting on, or a genuinely new opportunity) — do not send an empty daily ping.
 
 ## Interpreting output
 
-- Top level: `{ ok, generatedAt, updateAvailable?, data, errors }`. If `updateAvailable` is present, tell the user a newer version exists and they can run `node cli.js upgrade`.
+- Top level: `{ ok, generatedAt, updateAvailable?, data, errors }`. If `updateAvailable` is present, tell the user a newer version exists and they can run `node "$SKILL_DIR/cli.js" upgrade`.
 - Position fields may be ESTIMATES or REAL: check `estimated` and `assumptions.valueResolvedFrom`. When `estimated: false` and `valueResolvedFrom: "r25-api"` or `"ember-api"`, the earnings/principal are real data from the vault's API, not approximations. When `estimated: true`, say "约/estimated" for `principal`/`realizedYield`/`expectedTotalYield`.
 - `assumptions.valueResolvedFrom: "ember-api"` (pALPHA) means value/yield came from the vault's own accounts API, so `principal` is the real cost basis rather than an entry-NAV approximation — those numbers are the most trustworthy. Such positions also carry `yieldBreakdown` (`realized` = already settled, `unrealized` = still in the position, `total` = `realizedYield`). Without that assumption the position fell back to on-chain `shares × NAV`; check `errors[]` for a `<vault>:ember` entry.
+- `shares: null` with `assumptions.sharesResolvedFrom: "unavailable"` means every chain's balance read failed — the wallet balance is UNKNOWN, not zero. The position is still reported because an off-chain book of record (the Ember accounts API, pALPHA) knows it, so `currentValue` and the yield figures remain trustworthy. Say the share count could not be read; never report it as 0. The per-chain reasons are in `errors[]` as `<vault>:chain-<chainId>`.
+- An `errors[]` entry scoped `r25` or `r25:<endpoint>` means the R25 dApp API did not answer, so R25-backed vaults (APC3M, VRPC-*) fell back to on-chain reads and may lack `r25` earnings/tranche data. pALPHA is unaffected — it never uses R25. A `Timestamp invalid (R0003_00001)` message specifically means the machine's clock has drifted: tell the user to fix the system clock, since every R25 call will keep failing until then.
 - `assumptions.valueResolvedFrom: "r25-api"` (APC3M, VRPC-SemiYearly, VRPC-Weekly) means earnings/NAV came from the R25 dApp API. The `r25` field carries real data: `earnings` (actual yield, not estimated), `baseApy` (base APY before boost), and `boost` (channel-specific incentive — e.g. TopNod +3% for VRPC vaults, `null` when no boost applies). The position's APY used for `expectedTotalYield` projection is `baseApy + boost.boostApy`.
 - `r25.tranches` (APC3M, VRPC-SemiYearly only) — per-deposit breakdown from the R25 positions API. Each tranche is one deposit with its own `expirationDate`, `daysUntilExpiration`, and `amountUsdc`. Tranches are sorted by expiration date ascending. For VRPC-SemiYearly (184-day lock from each deposit), this gives exact per-tranche unlock dates that the on-chain contract cannot provide. `r25.redemptionFreezeWindowMs` is the freeze window before settlement (VRPCS: 7 days = must request redemption at least 7 days before maturity). Absent for VRPC-Weekly (positions API unsupported).
 - **APY channels / 购买渠道与 APY**: the same vault offers different APY depending on where you buy. In `vaults`/`advise` output, `apy`/`apyValue` (from harbor) is the boosted rate and `r25BaseApy` is the base rate on the R25 website. Current channels:
@@ -123,3 +133,4 @@ acting on, or a genuinely new opportunity) — do not send an empty daily ping.
   1. **Exact dates from R25 tranches when available, otherwise no exact dates.** When `r25.tranches` is present (APC3M, VRPC-SemiYearly via R25 positions API), each tranche has an exact `expirationDate`. Present these as per-tranche unlock dates. `actionPeriod.redeemable.maxRedeemShares` is the sum of all non-expired tranche shares — ALL of them are requestable for withdrawal (not just one settlement window's worth, which is the misleading on-chain `maxRedeem` for ERC-7540). The reminder message says "requestable for withdrawal now (all non-expired tranche shares)" for `r25-api` source with redeemable data. When tranches are absent (VRPC-Weekly or API down), there is NO unlock/maturity date available — do NOT state or guess one; convey the rule as "`lockDays`-day lock from deposit" and the on-chain fallback message. `depositedDurationDays`, `lockEnd`, and `expectedTotalYield` remain `null` for redeemability-based vaults.
   2. **Cost basis: real when R25 data available, approximation otherwise.** When `assumptions.valueResolvedFrom: "r25-api"`, `realizedYield` is the actual earnings from the R25 API and `principal` is derived from it (currentValue − earnings) — these are real numbers, not estimates. When R25 data is unavailable (API down), the position falls back to `estimated: true` with `assumptions.entryNav` (entry NAV = 1 approximation) — say "约/estimated" in that case.
 - `errors[]` lists per-scope failures; other data is still valid (partial success). A `<vault>:redeemability` entry means the on-chain redeemability read failed (RPC issue) — in that case the withdraw status is unknown, NOT "locked".
+- `upgrade` output: `upgraded` is `true` only when a file was actually replaced. An already-current install returns `upgraded: false` with `files: []` and a `note` saying so — report that as "already up to date", NOT as a successful upgrade. `files` lists exactly what changed, and `to` is the release version when the release publishes one (older releases report `"latest"`). Never claim a version bump that `from`/`to` do not show.

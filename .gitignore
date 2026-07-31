@@ -2,3 +2,6 @@ node_modules/
 *.log
 .DS_Store
 dist/
+
+# Ad-hoc debug scripts (see DEV.md)
+/*.mjs

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fetchText } from '../util/http.ts';
 import { VERSION, OWNER, REPO } from '../version.ts';
@@ -33,11 +33,29 @@ async function fetchVerified(name: string): Promise<string> {
 }
 
 export interface UpgradeResult {
+  /** True only when at least one file was actually replaced. */
   upgraded: boolean;
   from: string;
+  /** The release's version when it publishes one, else "latest". */
   to: string;
+  /** Files that were replaced — empty when everything was already current. */
   files: string[];
   note?: string;
+}
+
+/**
+ * The release's own version marker, when it publishes one. Absent on older
+ * releases, so a failure here is not fatal: it only decides whether `to`
+ * can name a version instead of saying "latest".
+ */
+async function fetchReleaseVersion(): Promise<string | undefined> {
+  try {
+    const text = await fetchText(`${releaseBase()}/VERSION`, { timeoutMs: 30000 });
+    const first = text.trim().split(/\s+/)[0];
+    return first && first.length > 0 ? first : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -48,7 +66,9 @@ export interface UpgradeResult {
  * against a fresh cli.js leaves the agent working from the wrong contract.
  *
  * Every asset is downloaded and hash-verified before anything is written, so a
- * failure partway through cannot leave a half-updated skill directory.
+ * failure partway through cannot leave a half-updated skill directory. Files
+ * whose contents already match the release are left alone, so `upgraded`
+ * answers "did anything change?" rather than "did the command run?".
  */
 export async function selfUpdate(opts: { targetPath?: string } = {}): Promise<UpgradeResult> {
   const target = opts.targetPath ?? process.argv[1];
@@ -59,21 +79,42 @@ export async function selfUpdate(opts: { targetPath?: string } = {}): Promise<Up
   const hasSkillMd = existsSync(skillMdPath);
 
   // Fetch and verify everything first — no writes until all digests match.
-  const [cliText, skillMdText] = await Promise.all([
+  const [cliText, skillMdText, releaseVersion] = await Promise.all([
     fetchVerified('cli.js'),
     hasSkillMd ? fetchVerified('SKILL.md') : Promise.resolve(undefined),
+    fetchReleaseVersion(),
   ]);
+
+  /** Already byte-identical → nothing to do; don't churn the file's mtime. */
+  const isCurrent = (path: string, text: string): boolean => {
+    try { return readFileSync(path, 'utf8') === text; } catch { return false; }
+  };
+
+  const pending: { dest: string; text: string; mode: number; label: string }[] = [];
+  if (!isCurrent(target, cliText)) pending.push({ dest: target, text: cliText, mode: 0o755, label: 'cli.js' });
+  if (skillMdText !== undefined && !isCurrent(skillMdPath, skillMdText)) {
+    pending.push({ dest: skillMdPath, text: skillMdText, mode: 0o644, label: 'SKILL.md' });
+  }
+
+  const to = releaseVersion ?? 'latest';
+
+  if (pending.length === 0) {
+    return {
+      upgraded: false,
+      from: VERSION,
+      to,
+      files: [],
+      note: 'already up to date; nothing was replaced',
+    };
+  }
 
   const staged: { tmp: string; dest: string }[] = [];
   try {
-    const stage = (dest: string, text: string, mode: number) => {
+    for (const { dest, text, mode } of pending) {
       const tmp = join(dir, `.${basename(dest)}.tmp-${process.pid}`);
       writeFileSync(tmp, text, { mode });
       staged.push({ tmp, dest });
-    };
-    stage(target, cliText, 0o755);
-    if (skillMdText !== undefined) stage(skillMdPath, skillMdText, 0o644);
-
+    }
     // renameSync is atomic on POSIX; safe even for the currently running script.
     for (const { tmp, dest } of staged) renameSync(tmp, dest);
   } catch (e) {
@@ -81,9 +122,8 @@ export async function selfUpdate(opts: { targetPath?: string } = {}): Promise<Up
     throw e;
   }
 
-  const files = ['cli.js', ...(skillMdText !== undefined ? ['SKILL.md'] : [])];
   const note = hasSkillMd
     ? 'restart to use the new version'
     : 'restart to use the new version; no SKILL.md found next to cli.js, so only cli.js was updated';
-  return { upgraded: true, from: VERSION, to: 'latest', files, note };
+  return { upgraded: true, from: VERSION, to, files: pending.map((p) => p.label), note };
 }

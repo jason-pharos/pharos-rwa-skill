@@ -39053,7 +39053,7 @@ async function checkForUpdate(opts) {
 
 // src/update/selfUpdate.ts
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync, writeFileSync as writeFileSync2, renameSync, unlinkSync } from "node:fs";
+import { existsSync, writeFileSync as writeFileSync2, readFileSync as readFileSync2, renameSync, unlinkSync } from "node:fs";
 import { basename, dirname, join as join2 } from "node:path";
 function sha2563(buf) {
   return createHash2("sha256").update(buf).digest("hex");
@@ -39077,25 +39077,55 @@ async function fetchVerified(name) {
   }
   return text;
 }
+async function fetchReleaseVersion() {
+  try {
+    const text = await fetchText(`${releaseBase()}/VERSION`, { timeoutMs: 3e4 });
+    const first = text.trim().split(/\s+/)[0];
+    return first && first.length > 0 ? first : void 0;
+  } catch {
+    return void 0;
+  }
+}
 async function selfUpdate(opts = {}) {
   const target = opts.targetPath ?? process.argv[1];
   if (!target) throw new Error("cannot resolve target path for self-update");
   const dir = dirname(target);
   const skillMdPath = join2(dir, "SKILL.md");
   const hasSkillMd = existsSync(skillMdPath);
-  const [cliText, skillMdText] = await Promise.all([
+  const [cliText, skillMdText, releaseVersion] = await Promise.all([
     fetchVerified("cli.js"),
-    hasSkillMd ? fetchVerified("SKILL.md") : Promise.resolve(void 0)
+    hasSkillMd ? fetchVerified("SKILL.md") : Promise.resolve(void 0),
+    fetchReleaseVersion()
   ]);
+  const isCurrent = (path, text) => {
+    try {
+      return readFileSync2(path, "utf8") === text;
+    } catch {
+      return false;
+    }
+  };
+  const pending = [];
+  if (!isCurrent(target, cliText)) pending.push({ dest: target, text: cliText, mode: 493, label: "cli.js" });
+  if (skillMdText !== void 0 && !isCurrent(skillMdPath, skillMdText)) {
+    pending.push({ dest: skillMdPath, text: skillMdText, mode: 420, label: "SKILL.md" });
+  }
+  const to = releaseVersion ?? "latest";
+  if (pending.length === 0) {
+    return {
+      upgraded: false,
+      from: VERSION,
+      to,
+      files: [],
+      note: "already up to date; nothing was replaced"
+    };
+  }
   const staged = [];
   try {
-    const stage = (dest, text, mode) => {
+    for (const { dest, text, mode } of pending) {
       const tmp = join2(dir, `.${basename(dest)}.tmp-${process.pid}`);
       writeFileSync2(tmp, text, { mode });
       staged.push({ tmp, dest });
-    };
-    stage(target, cliText, 493);
-    if (skillMdText !== void 0) stage(skillMdPath, skillMdText, 420);
+    }
     for (const { tmp, dest } of staged) renameSync(tmp, dest);
   } catch (e) {
     for (const { tmp } of staged) {
@@ -39106,9 +39136,8 @@ async function selfUpdate(opts = {}) {
     }
     throw e;
   }
-  const files = ["cli.js", ...skillMdText !== void 0 ? ["SKILL.md"] : []];
   const note = hasSkillMd ? "restart to use the new version" : "restart to use the new version; no SKILL.md found next to cli.js, so only cli.js was updated";
-  return { upgraded: true, from: VERSION, to: "latest", files, note };
+  return { upgraded: true, from: VERSION, to, files: pending.map((p) => p.label), note };
 }
 
 // src/index.ts
