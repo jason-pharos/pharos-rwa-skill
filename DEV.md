@@ -16,7 +16,7 @@ npm install
 | `npm run typecheck` | TypeScript type check |
 | `npm test` | Run all 80+ unit tests (no network needed) |
 | `npm run build` | Bundle `skills/pharos-rwa-manager/cli.js` via esbuild |
-| `npm run dist` | Stage release assets into `dist/` (`cli.js` + `cli.js.sha256`) |
+| `npm run dist` | Stage release assets into `dist/` (`cli.js` + `cli.js.sha256` + `SKILL.md.sha256` + `VERSION`) |
 | `npm run release:gh` | Build assets + create the GitHub Release for the current version |
 | `npm version <patch\|minor\|major>` | Full release: typecheck → test → build → commit → tag → push → GitHub Release |
 
@@ -41,8 +41,8 @@ Rules that follow from this:
   After editing `src/`, run `npm run build` and commit the result.
 - Never copy `SKILL.md` into a scratch dir like `dist/` — a second directory with a
   `SKILL.md` makes the installer treat it as another skill and it can win discovery.
-  `npm run dist` therefore stages only `cli.js` + `cli.js.sha256`; the release
-  uploads `SKILL.md` straight from `skills/pharos-rwa-manager/`.
+  `npm run dist` therefore stages only `cli.js` plus digest/version sidecars; the
+  release uploads `SKILL.md` straight from `skills/pharos-rwa-manager/`.
 
 Verify after any change to the layout:
 
@@ -73,6 +73,11 @@ Two invariants in `src/update/selfUpdate.ts`:
 - **Never create a `SKILL.md` that wasn't there.** If no `SKILL.md` sits next to
   `cli.js` (someone dropped the binary somewhere standalone), it is skipped and
   the result says so.
+- **`upgraded` means something actually changed.** Files whose contents already
+  match the release are left alone (their mtime is not even touched), and an
+  already-current install returns `upgraded: false` with `files: []`. This used
+  to be hard-coded `true`, which is how an agent came to report
+  "0.1.0 → latest 更新完成" on a run that replaced nothing.
 
 A missing `SKILL.md.sha256` asset is a hard failure, not a silent skip — cutting
 a release by hand instead of via `npm run release:gh` will break `upgrade` for
@@ -128,7 +133,7 @@ npm lifecycle hooks chain the whole release:
 | `version` | `build` + `git add -A` | Runs **after** `package.json` is bumped, so `__VERSION__` baked into `cli.js` is the new version. The rebuilt `cli.js` goes into the version commit |
 | `postversion` | `git push --follow-tags` + `release:gh` | Push tag, then publish the GitHub Release |
 
-`release:gh` runs `npm run dist` and uploads exactly four assets:
+`release:gh` runs `npm run dist` and uploads exactly five assets:
 
 | Asset | Consumer |
 |-------|----------|
@@ -136,9 +141,16 @@ npm lifecycle hooks chain the whole release:
 | `cli.js.sha256` | Integrity check for the above — the upgrade **fails closed** without it |
 | `SKILL.md` | Self-update, plus manual/curl installs that skip cloning |
 | `SKILL.md.sha256` | Integrity check for `SKILL.md` — also fails closed |
+| `VERSION` | Lets `upgrade` report the version it moved *to* instead of the string `latest` |
 
-All four are required. `upgrade` refuses to touch anything if any asset is
-missing or any digest mismatches.
+The two payloads and their digests are required: `upgrade` refuses to touch
+anything if any of them is missing or any digest mismatches. `VERSION` is the one
+optional asset — without it the upgrade still runs and `to` degrades to
+`"latest"` (which is how every release up to and including v0.2.1 behaves).
+
+Note that installs only ever fetch the two payload files. The digests are read
+and discarded, and `VERSION` is a cosmetic field — nothing beyond `SKILL.md` and
+`cli.js` is ever written to a user's skill directory.
 
 Requires the `gh` CLI to be authenticated (`gh auth status`).
 
