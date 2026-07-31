@@ -10,7 +10,7 @@ import { fetchEmberPositionValue } from './sources/ember.ts';
 import { buildReminders, type Reminder } from './logic/reminders.ts';
 import { buildAdvice } from './logic/advise.ts';
 import { checkForUpdate } from './update/checkVersion.ts';
-import { selfUpdate } from './update/selfUpdate.ts';
+import { selfUpdate, type UpgradeResult } from './update/selfUpdate.ts';
 import { nowSec } from './util/time.ts';
 
 export interface RunOpts { rpc?: string; noRemote: boolean; now?: number }
@@ -367,13 +367,13 @@ export async function runAdvise(address: string, opts: RunOpts): Promise<Envelop
   return makeEnvelope(buildAdvice(market, positions), errors, await safeUpdate(opts));
 }
 
-export async function runUpgrade(): Promise<Envelope<{ upgraded: boolean; from: string; to: string; note?: string }>> {
+export async function runUpgrade(): Promise<Envelope<UpgradeResult>> {
   const errors: Envelope<unknown>['errors'] = [];
   try {
     const r = await selfUpdate({});
     return makeEnvelope(r, errors);
   } catch (e) {
     errors.push({ scope: 'upgrade', error: String((e as Error).message ?? e) });
-    return makeEnvelope({ upgraded: false, from: '', to: '' }, errors);
+    return makeEnvelope({ upgraded: false, from: '', to: '', files: [] }, errors);
   }
 }

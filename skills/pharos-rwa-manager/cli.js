@@ -35631,8 +35631,8 @@ var Network = class _Network {
    *  Gets a list of all plugins that match %%name%%, with otr without
    *  a fragment.
    */
-  getPlugins(basename) {
-    return this.plugins.filter((p) => p.name.split("#")[0] === basename);
+  getPlugins(basename2) {
+    return this.plugins.filter((p) => p.name.split("#")[0] === basename2);
   }
   /**
    *  Create a copy of this Network.
@@ -39047,30 +39047,62 @@ async function checkForUpdate(opts) {
 
 // src/update/selfUpdate.ts
 import { createHash as createHash2 } from "node:crypto";
-import { writeFileSync as writeFileSync2, renameSync } from "node:fs";
-import { dirname, join as join2 } from "node:path";
+import { existsSync, writeFileSync as writeFileSync2, renameSync, unlinkSync } from "node:fs";
+import { basename, dirname, join as join2 } from "node:path";
 function sha2563(buf) {
   return createHash2("sha256").update(buf).digest("hex");
 }
 function releaseBase() {
   return `https://github.com/${OWNER}/${REPO}/releases/latest/download`;
 }
+function parseSha256File(text) {
+  const first = text.trim().split(/\s+/)[0]?.toLowerCase();
+  return first && /^[0-9a-f]{64}$/.test(first) ? first : void 0;
+}
+async function fetchVerified(name) {
+  const [text, shaText] = await Promise.all([
+    fetchText(`${releaseBase()}/${name}`, { timeoutMs: 3e4 }),
+    fetchText(`${releaseBase()}/${name}.sha256`, { timeoutMs: 3e4 })
+  ]);
+  const expected = parseSha256File(shaText);
+  const actual = sha2563(Buffer.from(text, "utf8"));
+  if (!expected || expected !== actual) {
+    throw new Error(`sha256 mismatch for ${name}: expected ${expected ?? "(unparseable)"}, got ${actual}; aborting, originals untouched`);
+  }
+  return text;
+}
 async function selfUpdate(opts = {}) {
   const target = opts.targetPath ?? process.argv[1];
   if (!target) throw new Error("cannot resolve target path for self-update");
-  const [cliText, shaText] = await Promise.all([
-    fetchText(`${releaseBase()}/cli.js`, { timeoutMs: 3e4 }),
-    fetchText(`${releaseBase()}/cli.js.sha256`, { timeoutMs: 3e4 })
+  const dir = dirname(target);
+  const skillMdPath = join2(dir, "SKILL.md");
+  const hasSkillMd = existsSync(skillMdPath);
+  const [cliText, skillMdText] = await Promise.all([
+    fetchVerified("cli.js"),
+    hasSkillMd ? fetchVerified("SKILL.md") : Promise.resolve(void 0)
   ]);
-  const expected = shaText.trim().split(/\s+/)[0]?.toLowerCase();
-  const actual = sha2563(Buffer.from(cliText, "utf8"));
-  if (!expected || expected !== actual) {
-    throw new Error(`sha256 mismatch: expected ${expected}, got ${actual}; aborting, original untouched`);
+  const staged = [];
+  try {
+    const stage = (dest, text, mode) => {
+      const tmp = join2(dir, `.${basename(dest)}.tmp-${process.pid}`);
+      writeFileSync2(tmp, text, { mode });
+      staged.push({ tmp, dest });
+    };
+    stage(target, cliText, 493);
+    if (skillMdText !== void 0) stage(skillMdPath, skillMdText, 420);
+    for (const { tmp, dest } of staged) renameSync(tmp, dest);
+  } catch (e) {
+    for (const { tmp } of staged) {
+      try {
+        unlinkSync(tmp);
+      } catch {
+      }
+    }
+    throw e;
   }
-  const tmp = join2(dirname(target), `.cli.js.tmp-${process.pid}`);
-  writeFileSync2(tmp, cliText, { mode: 493 });
-  renameSync(tmp, target);
-  return { upgraded: true, from: VERSION, to: "latest", note: "restart to use the new version" };
+  const files = ["cli.js", ...skillMdText !== void 0 ? ["SKILL.md"] : []];
+  const note = hasSkillMd ? "restart to use the new version" : "restart to use the new version; no SKILL.md found next to cli.js, so only cli.js was updated";
+  return { upgraded: true, from: VERSION, to: "latest", files, note };
 }
 
 // src/index.ts
@@ -39350,7 +39382,7 @@ async function runUpgrade() {
     return makeEnvelope(r, errors);
   } catch (e) {
     errors.push({ scope: "upgrade", error: String(e.message ?? e) });
-    return makeEnvelope({ upgraded: false, from: "", to: "" }, errors);
+    return makeEnvelope({ upgraded: false, from: "", to: "", files: [] }, errors);
   }
 }
 

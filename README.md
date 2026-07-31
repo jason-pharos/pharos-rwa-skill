@@ -105,7 +105,9 @@ npx skills update                                   # if installed via npx skill
 cd /path/to/pharos-rwa-skill && git pull            # if cloned manually
 ```
 
-Or let the CLI self-update `cli.js` from the newest GitHub Release:
+Or let the CLI self-update from the newest GitHub Release. It replaces both
+`cli.js` and the `SKILL.md` next to it, each verified against its published
+sha256, and writes nothing unless every file checks out:
 
 ```bash
 node cli.js upgrade

@@ -56,9 +56,27 @@ find . -type f    # must list exactly SKILL.md + cli.js (plus skills-lock.json)
 is the installer's behaviour and not configurable. Only the skill directory is
 copied into the user's machine, and the temp clone is discarded.
 
-Self-update (`node cli.js upgrade`) is already minimal: it fetches only `cli.js`
-and `cli.js.sha256` from `releases/latest/download`, verifies the hash, and
-atomically replaces the local file. No source, no tarball, no git.
+Self-update (`node cli.js upgrade`) mirrors this: it fetches only the release
+assets for the two installed files — `cli.js` and `SKILL.md`, each with its
+`.sha256` sidecar — from `releases/latest/download`. No source, no tarball, no git.
+
+`SKILL.md` is updated too, not just `cli.js`: the markdown carries the command
+list, the output-field contract, and the trigger conditions, so a fresh `cli.js`
+against a stale `SKILL.md` leaves the agent working from the wrong instructions.
+
+Two invariants in `src/update/selfUpdate.ts`:
+
+- **Verify everything before writing anything.** Both assets are downloaded and
+  hash-checked up front; then both are staged to temp files and `rename`d. A
+  failure at any point leaves the skill directory completely untouched — never
+  a new `cli.js` next to an old `SKILL.md`.
+- **Never create a `SKILL.md` that wasn't there.** If no `SKILL.md` sits next to
+  `cli.js` (someone dropped the binary somewhere standalone), it is skipped and
+  the result says so.
+
+A missing `SKILL.md.sha256` asset is a hard failure, not a silent skip — cutting
+a release by hand instead of via `npm run release:gh` will break `upgrade` for
+everyone.
 
 ## Project Layout
 
@@ -110,13 +128,17 @@ npm lifecycle hooks chain the whole release:
 | `version` | `build` + `git add -A` | Runs **after** `package.json` is bumped, so `__VERSION__` baked into `cli.js` is the new version. The rebuilt `cli.js` goes into the version commit |
 | `postversion` | `git push --follow-tags` + `release:gh` | Push tag, then publish the GitHub Release |
 
-`release:gh` runs `npm run dist` and uploads exactly three assets:
+`release:gh` runs `npm run dist` and uploads exactly four assets:
 
 | Asset | Consumer |
 |-------|----------|
 | `cli.js` | `node cli.js upgrade` self-update |
 | `cli.js.sha256` | Integrity check for the above — the upgrade **fails closed** without it |
-| `SKILL.md` | Manual/curl installs that want the two files without cloning |
+| `SKILL.md` | Self-update, plus manual/curl installs that skip cloning |
+| `SKILL.md.sha256` | Integrity check for `SKILL.md` — also fails closed |
+
+All four are required. `upgrade` refuses to touch anything if any asset is
+missing or any digest mismatches.
 
 Requires the `gh` CLI to be authenticated (`gh auth status`).
 
