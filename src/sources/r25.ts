@@ -5,13 +5,22 @@
  * requests that arrive too fast get "System busy" (R0005_00001). This client
  * serialises calls with a minimum interval to stay under the limit.
  *
- * Every function returns null on failure (network error, API error, timeout)
- * so callers can fall back to on-chain reads.
+ * Failures throw with the reason the API gave, so callers can record WHY they
+ * fell back to on-chain reads. This matters because the API validates
+ * `x-timestamp`: a host with a skewed clock gets 401 "Timestamp invalid"
+ * (R0003_00001) on every single call, which is indistinguishable from an outage
+ * unless the message is surfaced.
  */
 
 const R25_BASE = 'https://app.r25.xyz/dapp';
 const MIN_INTERVAL_MS = 1200;
-const TIMEOUT_MS = 12000;
+/**
+ * Per-request timeout. Kept well under the caller's overall R25 deadline (see
+ * R25_DEADLINE_MS in index.ts) so a blocked host cannot stack several requests
+ * past it — these calls are serialised behind MIN_INTERVAL_MS, so their waits
+ * add up rather than overlap.
+ */
+const TIMEOUT_MS = 4000;
 
 let lastRequestAt = 0;
 
@@ -21,8 +30,9 @@ async function r25Post<T>(path: string, body: Record<string, unknown>): Promise<
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastRequestAt = Date.now();
 
+  let res: Response;
   try {
-    const res = await fetch(`${R25_BASE}${path}`, {
+    res = await fetch(`${R25_BASE}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -34,12 +44,21 @@ async function r25Post<T>(path: string, body: Record<string, unknown>): Promise<
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { success: boolean; data: T };
-    return json.success ? json.data : null;
-  } catch {
-    return null;
+  } catch (e) {
+    const name = (e as Error)?.name;
+    throw new Error(name === 'TimeoutError' || name === 'AbortError'
+      ? `${path}: no response within ${TIMEOUT_MS}ms`
+      : `${path}: ${String((e as Error)?.message ?? e)}`);
   }
+
+  // Read the body even on a non-2xx: the API puts its reason there (e.g. 401
+  // with "Timestamp invalid", which points at a clock-skewed host).
+  const json = await res.json().catch(() => null) as { success?: boolean; code?: string; message?: string; data?: T } | null;
+  if (!res.ok || !json?.success) {
+    const detail = json?.message ? `${json.message}${json.code ? ` (${json.code})` : ''}` : `HTTP ${res.status}`;
+    throw new Error(`${path}: ${detail}`);
+  }
+  return json.data ?? null;
 }
 
 // ── API response types ──────────────────────────────────────────────

@@ -165,7 +165,14 @@ export interface R25HoldingInfo {
 
 export interface Position {
   vault: VaultId;
-  shares: string;              // human-readable decimal string
+  /**
+   * Human-readable decimal string, or null when every chain's balance read
+   * failed. Null does NOT mean "no shares" — it means the wallet balance is
+   * unknown; check `assumptions.sharesResolvedFrom`. A position can still carry
+   * a value in that case when an off-chain book of record (the Ember accounts
+   * API, for pALPHA) knows the holding.
+   */
+  shares: string | null;
   nav: number | null;
   currentValue: number | null;
   estimated: boolean;

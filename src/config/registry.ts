@@ -52,9 +52,10 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
         chainId: 1,
         rpcUrlEnv: 'ETHEREUM_RPC_URL',
         rpcUrl: 'https://ethereum-rpc.publicnode.com',
+        // Verified reachable 2026-07-30. Dropped from this list: eth.llamarpc.com
+        // (HTTP 521) and rpc.ankr.com/eth (no response) — both dead, and a dead
+        // fallback costs a full connect timeout before the next one is tried.
         rpcUrlFallbacks: [
-          'https://eth.llamarpc.com',
-          'https://rpc.ankr.com/eth',
           'https://eth.drpc.org',
         ],
         token: '0xC3AaCb558aFB635307B66FDb405188138576fc4c',

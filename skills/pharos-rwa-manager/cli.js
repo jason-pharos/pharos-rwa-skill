@@ -20941,9 +20941,10 @@ var DEFAULT_REGISTRY = [
         chainId: 1,
         rpcUrlEnv: "ETHEREUM_RPC_URL",
         rpcUrl: "https://ethereum-rpc.publicnode.com",
+        // Verified reachable 2026-07-30. Dropped from this list: eth.llamarpc.com
+        // (HTTP 521) and rpc.ankr.com/eth (no response) — both dead, and a dead
+        // fallback costs a full connect timeout before the next one is tried.
         rpcUrlFallbacks: [
-          "https://eth.llamarpc.com",
-          "https://rpc.ankr.com/eth",
           "https://eth.drpc.org"
         ],
         token: "0xC3AaCb558aFB635307B66FDb405188138576fc4c",
@@ -21179,15 +21180,16 @@ async function fetchHarbor() {
 // src/sources/r25.ts
 var R25_BASE = "https://app.r25.xyz/dapp";
 var MIN_INTERVAL_MS = 1200;
-var TIMEOUT_MS = 12e3;
+var TIMEOUT_MS = 4e3;
 var lastRequestAt = 0;
 async function r25Post(path, body) {
   const now = Date.now();
   const wait2 = Math.max(0, lastRequestAt + MIN_INTERVAL_MS - now);
   if (wait2 > 0) await new Promise((r) => setTimeout(r, wait2));
   lastRequestAt = Date.now();
+  let res;
   try {
-    const res = await fetch(`${R25_BASE}${path}`, {
+    res = await fetch(`${R25_BASE}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -21199,12 +21201,16 @@ async function r25Post(path, body) {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json.success ? json.data : null;
-  } catch {
-    return null;
+  } catch (e) {
+    const name = e?.name;
+    throw new Error(name === "TimeoutError" || name === "AbortError" ? `${path}: no response within ${TIMEOUT_MS}ms` : `${path}: ${String(e?.message ?? e)}`);
   }
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success) {
+    const detail = json?.message ? `${json.message}${json.code ? ` (${json.code})` : ""}` : `HTTP ${res.status}`;
+    throw new Error(`${path}: ${detail}`);
+  }
+  return json.data ?? null;
 }
 function fetchR25VaultList() {
   return r25Post("/vault/list", {});
@@ -39152,10 +39158,10 @@ async function runVaults(opts) {
   await enrichWithR25(vaults, opts);
   return makeEnvelope({ vaults }, errors, await safeUpdate(opts));
 }
-async function navFor(entry, provider) {
+async function navFor(entry, provider, deps) {
   const { vault, shareDecimals, assetDecimals } = entry.onchainNav;
   try {
-    const nav = await getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
+    const nav = await deps.getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
     return { nav, apy: entry.apyFallback, navResolvedFrom: "onchain" };
   } catch {
     return { nav: null, apy: entry.apyFallback, navResolvedFrom: "none" };
@@ -39218,84 +39224,133 @@ function derivePositionsFromActivity(vaultId, items, totalShares, lockDays) {
     // ERC-4626 sync — no freeze
   };
 }
-async function buildPositions(address, opts, errors) {
-  const registry = await loadRegistry({ noRemote: opts.noRemote });
-  const provider = providerFor(opts);
-  const now = opts.now ?? nowSec();
-  const positions = [];
-  const hasR25Vaults = registry.some((e) => e.r25VaultId);
-  let r25Holdings = null;
-  const r25Periods = /* @__PURE__ */ new Map();
-  const r25Positions = /* @__PURE__ */ new Map();
-  if (hasR25Vaults) {
+var DEFAULT_DEPS = {
+  getVaultShares,
+  getVaultNavOnchain,
+  getRedeemability,
+  fetchEmberPositionValue,
+  fetchR25Holdings,
+  fetchR25VaultPeriod,
+  fetchR25Positions,
+  fetchR25Activity
+};
+var R25_DEADLINE_MS = 8e3;
+async function withDeadline(work, ms) {
+  let timer;
+  const expired = Symbol("expired");
+  try {
+    work.catch(() => {
+    });
+    const raced = await Promise.race([
+      work,
+      new Promise((r) => {
+        timer = setTimeout(() => r(expired), ms);
+      })
+    ]);
+    return raced === expired ? null : raced;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+async function fetchR25Data(address, registry, deps, errors) {
+  const periods = /* @__PURE__ */ new Map();
+  const positions = /* @__PURE__ */ new Map();
+  let holdings = null;
+  const note = (path, e) => {
+    errors.push({ scope: `r25:${path}`, error: String(e?.message ?? e) });
+  };
+  try {
+    const list = await deps.fetchR25Holdings(address);
+    if (list) holdings = new Map(list.map((h) => [h.vaultId, h]));
+    else note("portfolio/holdings", "no data (API error, rate limit, or timeout)");
+  } catch (e) {
+    note("portfolio/holdings", e);
+  }
+  for (const entry of registry) {
+    if (!entry.r25VaultId || !entry.actionPeriodConfig) continue;
     try {
-      const holdings = await fetchR25Holdings(address);
-      if (holdings) r25Holdings = new Map(holdings.map((h) => [h.vaultId, h]));
-    } catch {
+      const period = await deps.fetchR25VaultPeriod(entry.r25VaultId);
+      if (period) periods.set(entry.r25VaultId, period);
+    } catch (e) {
+      note(`vault/period:${entry.r25VaultId}`, e);
     }
+  }
+  if (holdings) {
+    const missing = [];
     for (const entry of registry) {
-      if (entry.r25VaultId && entry.actionPeriodConfig) {
-        try {
-          const period = await fetchR25VaultPeriod(entry.r25VaultId);
-          if (period) r25Periods.set(entry.r25VaultId, period);
-        } catch {
-        }
+      if (!entry.r25VaultId || !holdings.has(entry.r25VaultId)) continue;
+      try {
+        const pos = await deps.fetchR25Positions(address, entry.r25VaultId);
+        if (pos) positions.set(entry.r25VaultId, pos);
+        else missing.push(entry.r25VaultId);
+      } catch {
+        missing.push(entry.r25VaultId);
       }
     }
-    if (r25Holdings) {
-      const missingPositions = [];
-      for (const entry of registry) {
-        if (!entry.r25VaultId || !r25Holdings.has(entry.r25VaultId)) continue;
-        try {
-          const pos = await fetchR25Positions(address, entry.r25VaultId);
-          if (pos) {
-            r25Positions.set(entry.r25VaultId, pos);
-          } else {
-            missingPositions.push(entry.r25VaultId);
+    if (missing.length > 0) {
+      try {
+        const activity = await deps.fetchR25Activity(address);
+        if (activity && activity.data.length > 0) {
+          for (const vid of missing) {
+            const entry = registry.find((e) => e.r25VaultId === vid);
+            const holding = holdings.get(vid);
+            const lockDays = entry?.redeemability?.lockDays;
+            if (!entry || !holding || !lockDays) continue;
+            const derived = derivePositionsFromActivity(vid, activity.data, Number(holding.shares), lockDays);
+            if (derived) positions.set(vid, derived);
           }
-        } catch {
-          missingPositions.push(entry.r25VaultId);
         }
-      }
-      if (missingPositions.length > 0) {
-        try {
-          const activity = await fetchR25Activity(address);
-          if (activity && activity.data.length > 0) {
-            for (const vid of missingPositions) {
-              const entry = registry.find((e) => e.r25VaultId === vid);
-              const r25h = r25Holdings.get(vid);
-              if (!entry || !r25h) continue;
-              const lockDays = entry.redeemability?.lockDays;
-              if (!lockDays) continue;
-              const derived = derivePositionsFromActivity(vid, activity.data, Number(r25h.shares), lockDays);
-              if (derived) r25Positions.set(vid, derived);
-            }
-          }
-        } catch {
-        }
+      } catch {
       }
     }
   }
+  return { holdings, periods, positions };
+}
+async function buildPositions(address, opts, errors, depsOverride) {
+  const deps = { ...DEFAULT_DEPS, ...depsOverride };
+  const registry = deps.registry ?? await loadRegistry({ noRemote: opts.noRemote });
+  const provider = providerFor(opts);
+  const now = opts.now ?? nowSec();
+  const positions = [];
+  const needsR25 = registry.some((e) => e.r25VaultId);
+  const r25DeadlineMs = opts.r25DeadlineMs ?? R25_DEADLINE_MS;
+  const r25Ready = needsR25 ? withDeadline(fetchR25Data(address, registry, deps, errors), r25DeadlineMs).then((data) => {
+    if (data == null) {
+      errors.push({ scope: "r25", error: `R25 API did not respond within ${r25DeadlineMs}ms; R25 vaults fall back to on-chain reads` });
+    }
+    return data;
+  }) : Promise.resolve(null);
+  r25Ready.catch(() => {
+  });
   await Promise.allSettled(registry.map(async (entry) => {
     try {
       const rpcOverrides = opts.rpc ? { [DEFAULT_CHAIN_ID]: opts.rpc } : {};
-      const shares = await getVaultShares(entry.balanceSources, address, rpcOverrides);
+      const shares = await deps.getVaultShares(entry.balanceSources, address, rpcOverrides);
       for (const be of shares.errors) {
         errors.push({ scope: `${entry.id}:chain-${be.chainId}`, error: be.error });
       }
-      const r25h = entry.r25VaultId ? r25Holdings?.get(entry.r25VaultId) : void 0;
-      const hasR25PositionData = entry.r25VaultId ? r25Positions.has(entry.r25VaultId) : false;
+      const sharesUnknown = shares.sources.length === 0 && shares.errors.length > 0;
+      const emberPending = entry.emberVaultId ? deps.fetchEmberPositionValue(address, entry.emberVaultId).catch((e) => {
+        errors.push({ scope: `${entry.id}:ember`, error: String(e.message ?? e) });
+        return null;
+      }) : null;
+      const r25Data = entry.r25VaultId ? await r25Ready : null;
+      const r25h = entry.r25VaultId ? r25Data?.holdings?.get(entry.r25VaultId) : void 0;
+      const r25Periods = r25Data?.periods;
+      const r25Positions = r25Data?.positions;
+      const hasR25PositionData = entry.r25VaultId ? r25Positions?.has(entry.r25VaultId) === true : false;
       const useR25ActionPeriod = hasR25PositionData && entry.redeemability?.async === true;
       let rawRedeem;
       if (entry.redeemability && !useR25ActionPeriod) {
         try {
-          rawRedeem = await getRedeemability(entry.redeemability.vault, address, entry.redeemability.requestId, entry.redeemability.shareDecimals, provider);
+          rawRedeem = await deps.getRedeemability(entry.redeemability.vault, address, entry.redeemability.requestId, entry.redeemability.shareDecimals, provider);
         } catch (e) {
           errors.push({ scope: `${entry.id}:redeemability`, error: String(e.message ?? e) });
         }
       }
       const hasRedeemActivity = rawRedeem != null && (rawRedeem.pendingRedeemShares > 0 || rawRedeem.claimableRedeemShares > 0 || rawRedeem.maxRedeemShares > 0);
-      if (shares.totalRaw === 0n && !hasRedeemActivity && !r25h) return;
+      const emberPosition = emberPending ? await emberPending : null;
+      if (shares.totalRaw === 0n && !hasRedeemActivity && !r25h && emberPosition == null) return;
       let nav;
       let apy;
       let navResolvedFrom;
@@ -39306,7 +39361,7 @@ async function buildPositions(address, opts, errors) {
         apy = baseApy + boostApy;
         navResolvedFrom = "r25-api";
       } else {
-        const result = await navFor(entry, provider);
+        const result = await navFor(entry, provider, deps);
         nav = result.nav;
         apy = result.apy;
         navResolvedFrom = result.navResolvedFrom;
@@ -39317,7 +39372,7 @@ async function buildPositions(address, opts, errors) {
         actionPeriod = resolveR25TrancheActionPeriod(r25Positions.get(entry.r25VaultId), totalShares, nav, entry.redeemability.lockDays, entry.redeemability.async, now);
       } else if (rawRedeem != null) {
         actionPeriod = resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability.lockDays, entry.redeemability.async);
-      } else if (entry.r25VaultId && r25Periods.has(entry.r25VaultId)) {
+      } else if (entry.r25VaultId && r25Periods?.has(entry.r25VaultId)) {
         actionPeriod = resolveR25ActionPeriod(r25Periods.get(entry.r25VaultId), now);
       } else {
         actionPeriod = resolveActionPeriod(entry, now);
@@ -39330,19 +39385,17 @@ async function buildPositions(address, opts, errors) {
         effectiveShares = (Number(shares.totalHuman) + escrowedShares).toString();
       }
       const common = { entry, sharesHuman: effectiveShares, nav, apy, actionPeriod, now, navResolvedFrom };
-      if (entry.emberVaultId) {
-        try {
-          const emberPosition = await fetchEmberPositionValue(address, entry.emberVaultId);
-          if (emberPosition) {
-            positions.push(computePAlphaPosition({ ...common, emberPosition }));
-            return;
-          }
-        } catch (e) {
-          errors.push({ scope: `${entry.id}:ember`, error: String(e.message ?? e) });
+      if (emberPosition) {
+        const position = computePAlphaPosition({ ...common, emberPosition });
+        if (sharesUnknown) {
+          position.shares = null;
+          position.assumptions.sharesResolvedFrom = "unavailable";
         }
+        positions.push(position);
+        return;
       }
       if (r25h) {
-        const posData = entry.r25VaultId ? r25Positions.get(entry.r25VaultId) : void 0;
+        const posData = entry.r25VaultId ? r25Positions?.get(entry.r25VaultId) : void 0;
         positions.push(computePosition({ ...common, r25Holding: toR25HoldingInfo(r25h, posData) }));
       } else {
         positions.push(computePosition(common));
