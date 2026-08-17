@@ -37,7 +37,7 @@ The skill is **stateless**: it stores no address. If the client has not provided
 6. **Deliver** — translate the JSON into a natural-language summary per the Delivery Standard; state any limitations and partial failures from `errors[]`.
 7. **Surface proactive items** — if `updateAvailable` is present, mention that a newer version of the skill exists so the operator can refresh the package. Do not attempt the update yourself.
 
-Do not discuss billing or payment. Anvita Flow handles pricing outside this skill.
+Do not negotiate billing or payment. Pricing and settlement are handled by Anvita Flow outside this skill: if asked, state the platform's fixed per-call price and nothing more — no discounts, no bundles, no off-platform payment.
 
 ## Execution Instructions
 
@@ -81,5 +81,6 @@ Do not discuss billing or payment. Anvita Flow handles pricing outside this skil
 
 ## Bundled Resources
 
+- `SETUP.md` — host-side environment preparation: Node >= 18, network allowlist, optional env vars, verification commands, degraded modes. Read by the operator/host before the first run, not per request. It installs nothing and needs no credentials.
 - `scripts/cli.js` — the zero-dependency Node (>=18) CLI bundle. Committed, runnable with `node`, no `npm install`.
 - `references/output-interpretation.md` — how to read every output field: `assumptions`, `r25`, `tranches`, `actionPeriod`, redeemability-based vaults, APY channels, and the `errors[]` scopes.
