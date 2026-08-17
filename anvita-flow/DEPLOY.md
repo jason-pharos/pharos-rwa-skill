@@ -30,6 +30,20 @@ cp skills/pharos-rwa-manager/cli.js anvita-flow/pharos-rwa-manager/scripts/cli.j
 chmod +x anvita-flow/pharos-rwa-manager/scripts/cli.js
 ```
 
+> ⚠️ 这份对外包**不暴露 `upgrade`**。`cli.js` 里仍带该命令，但它会原地改写文件，且在 `scripts/` 布局下看不到上一层的 `SKILL.md`（只会换掉 `cli.js`，导致文档与代码漂移）。方向与 `docs/…host-managed-updates-design.md` 一致：更新由宿主重装包完成。SKILL.md 与 references 已写明「不要运行」。
+
+## 第 1.5 步 — 安装到宿主 agent 的 skills 目录
+
+**这一步不能省**：a2a 策略只是对外宣告能力，真正被调用时宿主 agent 必须能加载到这个 skill。
+
+```bash
+anvitaflow config get-env skillsDir            # 确认目标目录，例如 ~/.claude/skills
+ln -s "$PWD/anvita-flow/pharos-rwa-manager" "$(anvitaflow config get-env skillsDir)/pharos-rwa-manager"
+node "$(anvitaflow config get-env skillsDir)/pharos-rwa-manager/scripts/cli.js" vaults   # 冒烟测试
+```
+
+> ⚠️ **不要用 `anvitaflow setup install <dir>` 装这个包。** 它不是通用 skill 安装器：无论 `source_dir` 传什么，它都只把 AnvitaFlow 自身的资源包链接过去，并且会**把 `source_dir` 的内容覆盖写入 `~/.agents/skills/AnvitaFlow`**、同时把 `~/.anvitaflow/env-config.json` 的 `skillsDir` 改成 `--skills-dir` 传入的值。用 symlink 手动装即可（仓库保持为唯一源）。
+
 ## 第 2 步 — 登录（Device OAuth）
 
 ```bash
@@ -87,6 +101,23 @@ anvitaflow status --json   # hasActiveAgent: true 且 authorizationStatus: COMPL
 anvitaflow a2a policy list --outbound --json
 ```
 
+## 第 7 步 — 让 Agent 在网关上线（接收入站调用）
+
+⚠️ **本机做不到**。按官方 `https://flow.anvita.xyz/setup.md`（Option 3）与
+`$SKILLS_DIR/AnvitaFlow/a2a-x402/SKILL.md` 的 Prerequisites，接收入站 A2A 请求要求：
+
+1. **Claw 系运行时 ≥ 2026.3.0**（OpenClaw / HomiClaw / ABClaw）在本机运行。
+   非 Claw 环境**只能作 client**（浏览、调用别人、付费），无法接收入站请求。
+   自检：`anvitaflow setup detect --json` 里要有 `"isClaw": true` 的条目。
+   本机 6 个框架（claude-code / cursor / windsurf / codex / gemini-cli /
+   github-copilot）全部 `isClaw: false`。
+2. 装 Agent Collaboration Gateway 插件（`a2a-x402/install-plugin.sh`）。
+3. 链上授权完成（已满足）+ 访问策略已配（已满足）。
+
+所以 `anvitaflow a2a login --auto --role server` 报 `A2A_001`、策略 `online: false`
+**不是** 授权传播延迟或网关地址过期，而是缺 Claw 运行时。要真正对外提供服务，
+需在一台装了 Claw 系环境的机器上完成第 1.5 步 + 本步。
+
 ## 本次部署状态（2026-08-17）
 
 | 项目 | 值 |
@@ -95,10 +126,13 @@ anvitaflow a2a policy list --outbound --json
 | Agent | Pharos RWA 管家（`agent_6P2HUXJCWTBK`） |
 | DID | `did:anvita:0xc6fed4fbe9a0f90308a3c06395cedcfe03e1fe5c` |
 | 授权 | `COMPLETED` |
-| 策略 | `friend`（好友定向）、`price: 0`（免费） |
+| 策略 | `friend`（好友定向）、`price: 0`（免费）、策略 id `299125` |
+| Skill 安装 | ✅ `~/.claude/skills/pharos-rwa-manager` → 仓库 `anvita-flow/pharos-rwa-manager`（symlink），`vaults` 冒烟通过 |
+| 网关在线 | ❌ `online: false` — 本机非 Claw 环境，见第 7 步 |
 
 ## 踩坑记录
 
 1. **后端地址失效** → 登录超时（`AUTH_001`）。改 `config set serverUrl https://flow.anvita.xyz` 解决。
 2. **账号不一致** → 配置里是 `jason@pharos.xyz`，浏览器却用 `jasonzhouu@gmail.com` 授权，导致原 Agent 不可见；最终在 `jasonzhouu@gmail.com` 下新建 Agent。
-3. **网关未在线（`A2A_001`）** → 定向策略已生效，但 `a2a login --auto --role server` 报「Agent 未授权或证书过期」，`online: false`。疑为链上授权传播延迟，或 beta 网关（`beta-hub.unchartedw3s.com`）与新版主站之间有单独的授权步骤。可稍后重试或到 `flow.anvita.xyz/dashboard` 检查。
+3. **网关未在线（`A2A_001`）** → 定向策略已生效，但 `a2a login --auto --role server` 报「Agent 未授权或证书过期」，`online: false`。**已定位**：不是授权延迟、也不是 `gatewayUrl` 过期，而是本机没有 Claw 系运行时，非 Claw 环境不能接收入站 A2A。详见第 7 步。重试 login 或改 gateway 地址都没用。
+4. **`anvitaflow setup install` 不是通用 skill 安装器** → 它会把传入的 `source_dir` 覆盖写进 `~/.agents/skills/AnvitaFlow`（把官方 AnvitaFlow 包整个换掉），并改写 `env-config.json` 的 `skillsDir`。踩过一次，从 `~/tmp/anvitaflow-setup/AnvitaFlow` 恢复。装自己的 skill 一律用 symlink（第 1.5 步）。

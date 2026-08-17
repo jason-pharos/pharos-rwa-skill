@@ -13,15 +13,14 @@ A zero-dependency CLI that inspects Pharos RWA vault positions and market data. 
 - **Position inspection** (`position <address>`) — APC3M + pALPHA + VRPC-SemiYearly + VRPC-Weekly holdings: current value, realized/expected yield, lock time.
 - **Withdraw / action-period reminders** (`reminders <address>`) — which held vaults can (soon) start a withdraw.
 - **Buy / allocation advice** (`advise <address>`) — market + position + vaults the client does not yet hold, with a `topPick` and `gapVaults`.
-- **Self-update** (`upgrade`) — replace `cli.js` and this `SKILL.md` from the latest GitHub Release.
 
-**Out of scope**: it does not execute trades, withdraws, deposits, transfers, or any transaction. It is strictly read-only — no keys, no signing, no writes, no state. Do not claim it can act on the position; it only reports.
+**Out of scope**: it does not execute trades, withdraws, deposits, transfers, or any transaction. It is strictly read-only — no keys, no signing, no writes, no state. Do not claim it can act on the position; it only reports. Updating the skill itself is not part of its scope either: version updates are host-managed, so never run `cli.js upgrade` from this package.
 
 ## Required Input
 
 | Input | Required for | Format |
 |---|---|---|
-| Operation | all | one of `vaults`, `position`, `reminders`, `advise`, `upgrade` |
+| Operation | all | one of `vaults`, `position`, `reminders`, `advise` |
 | Wallet address | `position`, `reminders`, `advise` | `0x` + 40 hex (invalid → error, exit 2). Not needed for `vaults`. |
 | Language | all | Chinese or English — match the client's language |
 | Flags (optional) | any | `--pretty` (indented JSON), `--rpc <url>`, `--no-remote` (offline) |
@@ -31,12 +30,12 @@ The skill is **stateless**: it stores no address. If the client has not provided
 ## Client Interaction Flow
 
 1. **Scope check** — confirm the request is about Pharos / RWA vault positions (APC3M, pALPHA, VRPC). If it's out of scope (e.g. executing a trade), say so and do not run the CLI.
-2. **Identify the operation** — map the request to `vaults` (overview), `position` (holdings), `reminders` (withdraw timing), `advise` (buy advice), or `upgrade`.
+2. **Identify the operation** — map the request to `vaults` (overview), `position` (holdings), `reminders` (withdraw timing), or `advise` (buy advice).
 3. **Gather missing input** — if `position`/`reminders`/`advise` and no address is known, ask once for the client's Pharos address (`0x…`). Validate it is `0x` + 40 hex before running. `vaults` needs no address.
 4. **Confirm the deliverable** — restate in one line what you'll return (e.g. "your APC3M + pALPHA + VRPC positions and yield, in Chinese"). No need to ask beyond the address.
 5. **Execute** — run the CLI (see Execution Instructions), allow ≥ 30 seconds before treating it as hung.
 6. **Deliver** — translate the JSON into a natural-language summary per the Delivery Standard; state any limitations and partial failures from `errors[]`.
-7. **Surface proactive items** — if `updateAvailable` is present, tell the client a newer version exists and they can run `upgrade`.
+7. **Surface proactive items** — if `updateAvailable` is present, mention that a newer version of the skill exists so the operator can refresh the package. Do not attempt the update yourself.
 
 Do not discuss billing or payment. Anvita Flow handles pricing outside this skill.
 
@@ -53,8 +52,9 @@ Do not discuss billing or payment. Anvita Flow handles pricing outside this skil
    node "$SKILL_DIR/scripts/cli.js" position 0xYourAddress  # holdings
    node "$SKILL_DIR/scripts/cli.js" reminders 0xYourAddress # withdraw timing
    node "$SKILL_DIR/scripts/cli.js" advise 0xYourAddress    # buy advice
-   node "$SKILL_DIR/scripts/cli.js" upgrade                 # self-update
    ```
+
+   The bundle also exposes an `upgrade` command. Do NOT run it: it rewrites `cli.js` in place, and in this package layout it cannot see `SKILL.md` (which sits one level above `scripts/`), so it would leave the docs and the code out of sync. Updates are host-managed — the operator reinstalls the package.
 
 4. Add `--pretty` for indented JSON; `--no-remote` to skip remote config/version checks (offline).
 5. Parse the top level `{ ok, generatedAt, updateAvailable?, data, errors }`. Read `references/output-interpretation.md` before reporting fields you do not recognize, especially any `errors[]` entry, `assumptions`, `actionPeriod`, `r25`, or `estimated` flag.

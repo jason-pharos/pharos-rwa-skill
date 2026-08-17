@@ -5,7 +5,7 @@ do not recognize. Top-level shape is always `{ ok, generatedAt, updateAvailable?
 
 ## Top level
 
-- `updateAvailable` present → tell the client a newer version exists; they can run `node "$SKILL_DIR/scripts/cli.js" upgrade`.
+- `updateAvailable` present → mention that a newer version of the skill exists so the operator can refresh the package. Do not run `cli.js upgrade` — updates are host-managed (see SKILL.md → Execution Instructions).
 - `errors[]` lists per-scope failures; other data is still valid (partial success). Always surface these to the client as "partial success" notes.
 
 ## Position fields — estimated vs real
@@ -59,7 +59,6 @@ Limitations to convey honestly:
 - A `<vault>:redeemability` entry means the on-chain redeemability read failed (RPC issue) — withdraw status is unknown, NOT "locked".
 - A `<vault>:chain-<chainId>` entry means a specific chain's balance read failed (see "shares: null" above).
 
-## Upgrade output
+## Updates
 
-- `upgraded` is `true` only when a file was actually replaced. An already-current install returns `upgraded: false` with `files: []` and a `note` — report as "already up to date", NOT a successful upgrade.
-- `files` lists exactly what changed; `to` is the release version when the release publishes one (older releases report `"latest"`). Never claim a version bump that `from`/`to` do not show.
+Version updates are host-managed: the operator reinstalls the package. The bundled `upgrade` command is out of scope for this skill — do not run it, and do not report upgrade results.
