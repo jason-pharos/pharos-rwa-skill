@@ -5,3 +5,4 @@ dist/
 
 # Ad-hoc debug scripts (see DEV.md)
 /*.mjs
+.agentix
