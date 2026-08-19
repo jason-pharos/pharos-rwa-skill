@@ -17,7 +17,7 @@ and never writes state outside an optional cache directory.
 |---|---|---|
 | Node.js | **>= 18** (`node -v`) | `cli.js` uses the built-in global `fetch`. Node 16 and below fail. |
 | Package install | **none** | `scripts/cli.js` is a zero-dependency bundle. Do **not** run `npm install`; there is no `package.json`. |
-| Runtime tool | **Bash / shell execution** | The Skill is invoked as `node "$SKILL_DIR/scripts/cli.js" <command>`. Enable at least the shell tool in Runtime 配置. |
+| Runtime tool | **`exec`** | The Skill is invoked as `node "<abs>/scripts/cli.js" <command>` with a literal absolute path (see §4 on command form). In Anvita Flow's Runtime 配置, enable `exec`. `web_search` / `web_fetch` / `browser` / `read` / `write` are not needed — the CLI issues its own HTTPS requests from Node. |
 | Outbound network | HTTPS to the hosts in §3 | Without it the Skill degrades or fails; see §6. |
 | System clock | accurate (NTP-synced, drift < ~30s) | The R25 API rejects skewed requests with `Timestamp invalid (R0003_00001)`. |
 | Credentials / keys | **none** | No API key, no private key, no wallet, no env secret. If any setup step asks for a key, something is wrong — stop. |
@@ -49,36 +49,45 @@ No inbound ports. No websockets. No other hosts are contacted. Icon URLs under
 
 ## 4. Setup steps
 
+> ⚠️ **Command form on a hosted runtime.** The snippets below are written for an *operator* at a
+> shell, where variables and `&&` are fine. A hosted Service Agent's `exec` policy is stricter: it
+> audits a leading `VAR=` assignment as environment-variable inspection and hard-denies the call
+> (observed: `Sensitive information access via exec is dangerous and unsupported:
+> environment-variable inspection is blocked in phase 1`), and it splits a top-level `&&` and audits
+> each part. So on a hosted runtime, run one command per call using a **single literal absolute
+> path** — no `$VAR`, no `VAR=`, no `export`, no `&&`. `SKILL.md` documents only that form, which is
+> what the Agent follows at runtime.
+
+Operator shell (replace the path with the real one):
+
 ```bash
-# 1) Resolve the package root to an ABSOLUTE path — the directory holding scripts/
-SKILL_DIR=/absolute/path/to/pharos-rwa-manager
+# 1) Verify the layout — one command per line, no chaining needed
+ls -l /absolute/path/to/pharos-rwa-manager/SKILL.md
+ls -l /absolute/path/to/pharos-rwa-manager/scripts/cli.js
 
-# 2) Verify the layout
-test -f "$SKILL_DIR/SKILL.md" && test -f "$SKILL_DIR/scripts/cli.js" && echo "layout ok"
-
-# 3) Verify the runtime
+# 2) Verify the runtime
 node -v            # must print v18 or newer
 
-# 4) Ensure the cache directory is writable, or redirect it
-export PHAROS_RWA_CACHE_DIR="${PHAROS_RWA_CACHE_DIR:-/tmp/pharos-rwa}"
-mkdir -p "$PHAROS_RWA_CACHE_DIR"
+# 3) Only if $HOME is read-only: redirect the cache (deployment-level env, not per command)
+mkdir -p /tmp/pharos-rwa
+# then set PHAROS_RWA_CACHE_DIR=/tmp/pharos-rwa in the runtime's environment configuration
 ```
 
-Always invoke by absolute path. Do **not** `cd` into the package with a relative
+Always invoke by a full literal absolute path. Do **not** `cd` into the package with a relative
 dot-prefixed path — some agent shell tools mangle a leading-dot path segment
 (a `.hermes/skills/...` path has been observed becoming `cd hermes`, failing with
 exit 126 before the command runs).
 
 ## 5. Verification
 
-Run both checks. Expect a single-line JSON object on stdout and exit code 0.
+Run both checks, one per call. Expect a single-line JSON object on stdout and exit code 0.
 
 ```bash
 # Offline path — proves the bundle and Node runtime are fine, no network involved
-node "$SKILL_DIR/scripts/cli.js" vaults --no-remote
+node "/absolute/path/to/pharos-rwa-manager/scripts/cli.js" vaults --no-remote
 
 # Online path — proves the network allowlist is correct
-node "$SKILL_DIR/scripts/cli.js" vaults
+node "/absolute/path/to/pharos-rwa-manager/scripts/cli.js" vaults
 ```
 
 Pass criteria:
@@ -91,7 +100,7 @@ Pass criteria:
 Address-scoped commands need no extra setup; a well-formed address is enough:
 
 ```bash
-node "$SKILL_DIR/scripts/cli.js" position 0x0000000000000000000000000000000000000000
+node "/absolute/path/to/pharos-rwa-manager/scripts/cli.js" position 0x0000000000000000000000000000000000000000
 ```
 
 An invalid address is expected to print single-line JSON on **stderr** and exit `2`.
@@ -123,4 +132,5 @@ console. If a run reports `updateAvailable`, surface it to the operator and stop
 | 單次最長執行時間 | 5–10 minutes | A call is normally 2–10s; the ceiling only covers R25 deadline + retries. |
 | 最大併發會話數 | 2–3 | The CLI is stateless with no shared lock, so concurrent calls are safe; each is a short-lived Node process. |
 | 單次任務 AI Credit 上限 | small | One call is a single CLI invocation plus a short summary — no long agent loops. |
-| Runtime 工具 | shell / Bash enabled | Required. File-write and network tools are not needed by this Skill. |
+| Runtime 工具 | only `exec` | Required. `web_search` / `web_fetch` / `browser` / `read` / `write` are not needed. At least one tool must be enabled or the form rejects it. |
+| 收款錢包 | must be selected | Step 1's 資源與測試幣收款 is validated (`請選擇收款錢包`). |
