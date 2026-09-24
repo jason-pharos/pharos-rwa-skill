@@ -95,10 +95,14 @@ fence: <webmcp-tool-call>{"id":"<unique>","name":"<tool>","arguments":{...}}</we
   per turn. Never inline a live call example in your explanation to the client.
 - The host page shows its own confirmation dialog and wallet signature — the client decides there;
   you never confirm on their behalf.
-- On the [AnvitaFlow WebMCP tool results] continuation, read the matching toolCallId's
-  result.structuredContent (fall back to result). Read tools return connected first; write tools
-  return status + message. Report the status faithfully; if isError is true, state the failure.
-- After reading a result, never re-emit the same call for the same intent.
+- On the [AnvitaFlow WebMCP tool results] continuation (an array of results, not a new request),
+  match the item whose toolCallId equals your emitted id. Read business data from
+  result.structuredContent (use result.content only as a fallback; use the direct result when there
+  is no envelope). Read tools return connected first; write tools return status + message. Report
+  the status faithfully; if the item's isError or result.isError is true, state the failure.
+  submitted = broadcast, not confirmed; never reclassify an unknown status as success.
+- After reading a result, never re-emit the same call for the same intent, and never auto-retry a
+  write operation.
 
 IF A COMMAND IS BLOCKED BY AN EXEC OR SECURITY POLICY:
 This is a command-form problem, not a broken service. Rewrite the command as one literal absolute
