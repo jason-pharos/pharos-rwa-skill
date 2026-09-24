@@ -44,7 +44,8 @@ The host MCP tools take **no address**: they always act on the wallet currently 
    - pAlpha / VRPC holdings, or any explicit `0x…` address → CLI (`vaults` / `position` / `reminders` / `advise`) with `--no-r25`.
    - Deposit / withdraw → **host MCP tools** (see the next section).
 3. **Gather missing input** —
-   - CLI path: if `position`/`reminders`/`advise` and no address is known, ask once for the client's Pharos address (`0x…`). Validate `0x` + 40 hex before running. `vaults` needs no address.
+   - The client's own assets (no address typed): call `wallet_get_address` first and use its `address`. If `connected: false`, ask the client to connect their wallet in the host page. **Never** use the agent's own payment/billing wallet address — it is not the client's wallet.
+   - CLI path: if `position`/`reminders`/`advise` and no address is known, use the address from `wallet_get_address`, or ask once for the client's Pharos address (`0x…`) when they gave none and no wallet is connected. Validate `0x` + 40 hex before running. `vaults` needs no address.
    - MCP path: no address to gather. For deposit/withdraw, confirm the **unit and amount** with the client first (USDC for pAlpha deposit, shares for APC/pAlpha withdraw) — units differ and getting them wrong moves the wrong quantity.
 4. **Confirm the deliverable** — restate in one line what you'll do (e.g. "your APC3M + pALPHA + VRPC positions and yield, in Chinese", or "redeem 0.001 APC3M shares from the connected wallet"). No need to loop on confirmations beyond the address/amount.
 5. **Execute** —
@@ -59,10 +60,11 @@ Do not negotiate billing or payment. Pricing and settlement are handled by Anvit
 
 This skill can drive deposits and withdrawals through the **host page's MCP tools**. You do not execute anything yourself: you emit a structured tool-call block in your reply; the host page runs it, shows its own confirmation dialog + wallet signature to the client, and feeds the result back to you for a follow-up reply. The confirmation dialog and the wallet signature are the human gate — you cannot and must not confirm on the client's behalf.
 
-### The five host tools
+### The host tools
 
 | Tool | Arguments | Acts on |
 |---|---|---|
+| `wallet_get_address` | `{}` | the connected wallet's address — use to look up "my" assets |
 | `apc_get_position` | `{}` | connected wallet's APC3M/USDC position |
 | `apc_get_vault_overview` | `{}` | APC vault public overview |
 | `apc_withdraw` | `{"amount":"<APC3M shares>"}` | redeem APC3M shares to USDC |
