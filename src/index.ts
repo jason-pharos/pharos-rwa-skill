@@ -16,6 +16,10 @@ import { nowSec } from './util/time.ts';
 export interface RunOpts {
   rpc?: string;
   noRemote: boolean;
+  /** When true, skip the R25 dApp API entirely (holdings, periods, positions,
+   *  activity, vault list). Use when the R25 API is region-restricted and the
+   *  caller supplies R25-backed data another way (e.g. host MCP tools). */
+  noR25?: boolean;
   now?: number;
   /** Cap on how long R25-dependent vaults wait for the R25 pre-fetch. Tests
    *  shorten this; production uses R25_DEADLINE_MS. */
@@ -43,6 +47,7 @@ function providerFor(opts: RunOpts) {
  *    R25 base APY is added as `r25BaseApy` so users can compare.
  */
 async function enrichWithR25(vaults: VaultMarket[], opts: RunOpts): Promise<void> {
+  if (opts.noR25) return;
   try {
     const registry = await loadRegistry({ noRemote: opts.noRemote });
     const r25List = await fetchR25VaultList();
@@ -313,7 +318,7 @@ export async function buildPositions(
   // R25 data whatsoever — behind up to six stacked 12s R25 timeouts. Only the
   // vaults that actually carry an `r25VaultId` await it, and even they give up
   // at the deadline rather than inheriting the full stack.
-  const needsR25 = registry.some((e) => e.r25VaultId);
+  const needsR25 = !opts.noR25 && registry.some((e) => e.r25VaultId);
   const r25DeadlineMs = opts.r25DeadlineMs ?? R25_DEADLINE_MS;
   const r25Ready: Promise<Awaited<ReturnType<typeof fetchR25Data>> | null> = needsR25
     ? withDeadline(fetchR25Data(address, registry, deps, errors), r25DeadlineMs)

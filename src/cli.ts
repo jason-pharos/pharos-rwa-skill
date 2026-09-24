@@ -12,17 +12,19 @@ function fail(message: string, code = 1): never {
 function assertAddress(addr: string): void {
   if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) fail(`invalid address: ${addr}`, 2);
 }
-function runOpts(o: { rpc?: string; remote?: boolean }): RunOpts {
-  return o.rpc === undefined ? { noRemote: o.remote === false } : { rpc: o.rpc, noRemote: o.remote === false };
+function runOpts(o: { rpc?: string; remote?: boolean; r25?: boolean }): RunOpts {
+  const base = { noRemote: o.remote === false, noR25: o.r25 === false };
+  return o.rpc === undefined ? base : { ...base, rpc: o.rpc };
 }
 
 const program = new Command();
 program.name('pharos-rwa').version(VERSION)
   .option('--pretty', 'pretty-print JSON')
   .option('--rpc <url>', 'override Pharos RPC URL')
-  .option('--no-remote', 'skip remote config + version check');
+  .option('--no-remote', 'skip remote config + version check')
+  .option('--no-r25', 'skip R25 dApp API (region-restricted)');
 
-function globals() { return program.opts<{ pretty?: boolean; rpc?: string; remote?: boolean }>(); }
+function globals() { return program.opts<{ pretty?: boolean; rpc?: string; remote?: boolean; r25?: boolean }>(); }
 
 program.command('vaults').description('market overview of all harbor vaults')
   .action(async () => { const g = globals(); emit(await runVaults(runOpts(g)), !!g.pretty); });

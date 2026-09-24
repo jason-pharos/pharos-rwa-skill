@@ -39157,6 +39157,7 @@ function providerFor(opts) {
   return makeProvider(opts.rpc ?? process.env.PHAROS_RPC_URL ?? DEFAULT_RPC, DEFAULT_CHAIN_ID);
 }
 async function enrichWithR25(vaults, opts) {
+  if (opts.noR25) return;
   try {
     const registry = await loadRegistry({ noRemote: opts.noRemote });
     const r25List = await fetchR25VaultList();
@@ -39341,7 +39342,7 @@ async function buildPositions(address, opts, errors, depsOverride) {
   const provider = providerFor(opts);
   const now = opts.now ?? nowSec();
   const positions = [];
-  const needsR25 = registry.some((e) => e.r25VaultId);
+  const needsR25 = !opts.noR25 && registry.some((e) => e.r25VaultId);
   const r25DeadlineMs = opts.r25DeadlineMs ?? R25_DEADLINE_MS;
   const r25Ready = needsR25 ? withDeadline(fetchR25Data(address, registry, deps, errors), r25DeadlineMs).then((data) => {
     if (data == null) {
@@ -39480,10 +39481,11 @@ function assertAddress(addr) {
   if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) fail(`invalid address: ${addr}`, 2);
 }
 function runOpts(o) {
-  return o.rpc === void 0 ? { noRemote: o.remote === false } : { rpc: o.rpc, noRemote: o.remote === false };
+  const base = { noRemote: o.remote === false, noR25: o.r25 === false };
+  return o.rpc === void 0 ? base : { ...base, rpc: o.rpc };
 }
 var program2 = new Command();
-program2.name("pharos-rwa").version(VERSION).option("--pretty", "pretty-print JSON").option("--rpc <url>", "override Pharos RPC URL").option("--no-remote", "skip remote config + version check");
+program2.name("pharos-rwa").version(VERSION).option("--pretty", "pretty-print JSON").option("--rpc <url>", "override Pharos RPC URL").option("--no-remote", "skip remote config + version check").option("--no-r25", "skip R25 dApp API (region-restricted)");
 function globals() {
   return program2.opts();
 }

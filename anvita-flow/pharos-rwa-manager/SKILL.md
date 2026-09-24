@@ -40,8 +40,9 @@ The host MCP tools take **no address**: they always act on the wallet currently 
 
 1. **Scope check** — confirm the request is about Pharos / RWA vault positions or APC/pAlpha deposit/withdraw. If it's out of scope (e.g. transferring to another address, another chain), say so and do not run anything.
 2. **Identify the operation** — map the request:
-   - Read any address's holdings/reminders/market/advice → CLI (`vaults` / `position` / `reminders` / `advise`).
-   - Deposit / withdraw / read the connected wallet's live APC-pAlpha state → **host MCP tools** (see the next section).
+   - The client's own APC position / withdraw window (in the host page, wallet connected) → **host MCP tools** `apc_get_position` / `apc_get_vault_overview`.
+   - pAlpha / VRPC holdings, or any explicit `0x…` address → CLI (`vaults` / `position` / `reminders` / `advise`) with `--no-r25`.
+   - Deposit / withdraw → **host MCP tools** (see the next section).
 3. **Gather missing input** —
    - CLI path: if `position`/`reminders`/`advise` and no address is known, ask once for the client's Pharos address (`0x…`). Validate `0x` + 40 hex before running. `vaults` needs no address.
    - MCP path: no address to gather. For deposit/withdraw, confirm the **unit and amount** with the client first (USDC for pAlpha deposit, shares for APC/pAlpha withdraw) — units differ and getting them wrong moves the wrong quantity.
@@ -151,13 +152,18 @@ and then quote the exact error.
 
 ### Commands
 
-Substitute the real absolute path for `<abs>` in each line, and run one line per `exec` call:
+Always add `--no-r25`: the R25 dApp API is region-restricted ("Access from your
+region is restricted due to compliance reasons") and would otherwise time out
+and surface two errors on every R25-backed vault. With `--no-r25`, APC3M/VRPC
+fall back to on-chain reads and pAlpha is unaffected (it never uses R25).
+Substitute the real absolute path for `<abs>` in each line, and run one line per
+`exec` call:
 
 ```bash
-node "<abs>/scripts/cli.js" vaults                  # market overview, no address needed
-node "<abs>/scripts/cli.js" position 0xYourAddress  # holdings
-node "<abs>/scripts/cli.js" reminders 0xYourAddress # withdraw timing
-node "<abs>/scripts/cli.js" advise 0xYourAddress    # buy advice
+node "<abs>/scripts/cli.js" vaults --no-r25                    # market overview, no address needed
+node "<abs>/scripts/cli.js" position 0xYourAddress --no-r25    # holdings
+node "<abs>/scripts/cli.js" reminders 0xYourAddress --no-r25   # withdraw timing
+node "<abs>/scripts/cli.js" advise 0xYourAddress --no-r25      # buy advice
 ```
 
 Multiple addresses: issue one call per address (`position 0xAAA`, then `position 0xBBB`). Never try
@@ -194,7 +200,7 @@ is a host-side deployment concern — never set, export, or read one from inside
 - **MCP — tool call produced but nothing executes** → the tool name is not registered/available in this host page. Say the action isn't available here and fall back to what you can do (CLI read), rather than retrying the call in a loop.
 - **MCP — result `isError: true` or a `status` other than `submitted`** → report it faithfully per the status table. A `declined`/`rejected` means the client chose not to proceed; do not retry unless they ask again.
 - Invalid address → `{"error":...}` on stderr, exit 2. Ask for a corrected `0x…` address; do not guess.
-- R25 API unreachable → the skill degrades to on-chain reads; report what is missing (see `references/output-interpretation.md` for the `r25` scope) rather than the failure as a hard error.
+- R25 API region-restricted / unreachable → expected; the `--no-r25` flag skips it. If an R25 error still surfaces, report what is missing (see `references/output-interpretation.md` for the `r25` scope) rather than the failure as a hard error, and prefer the host MCP tools for APC.
 - `Timestamp invalid (R0003_00001)` means the machine clock has drifted — tell the client to fix the system clock; every R25 call keeps failing until then.
 - Partial coverage across several addresses: if one address is refused or fails, still deliver the results for the others and state plainly which address is missing and why.
 - On hard failure, report the cause and any completed work; explain unsupported requests clearly.
