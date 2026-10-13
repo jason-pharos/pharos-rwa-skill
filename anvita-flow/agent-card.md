@@ -25,7 +25,8 @@ RWA vaults plus deposit / withdraw on the client's connected wallet:
    can start a withdrawal now or soon.
 4. Buy and allocation guidance — market data, current holdings, and vaults not yet held, with a top
    pick and allocation gaps for reference.
-5. Deposit and withdraw — redeem APC3M shares, deposit USDC into pAlpha, redeem pALPHA shares,
+5. Deposit and withdraw — deposit USDC into APC, redeem APC3M shares, deposit USDC into pAlpha,
+   redeem pALPHA shares,
    executed on the connected wallet through the host page, which shows the confirmation dialog and
    collects the wallet signature.
 
@@ -41,8 +42,9 @@ holds the wallet and collects the signature. This service holds no private key a
 2. "When can I redeem my APC3M? Is it still in the lock period?"
 3. "Which RWA vaults are open on Pharos right now, and what are their APYs?"
 4. "Given my current holdings, which vault should I buy next? What am I missing?"
-5. "Redeem 0.001 APC3M shares from my connected wallet."
-6. "Deposit 100 USDC into pAlpha."
+5. "Deposit 10 USDC into APC."
+6. "Redeem 0.001 APC3M shares from my connected wallet."
+7. "Deposit 100 USDC into pAlpha."
 ```
 
 ## 客户需提供的资讯（Required Information from Client）
