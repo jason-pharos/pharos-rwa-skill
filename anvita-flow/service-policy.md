@@ -40,7 +40,8 @@ withdraw goes through the host MCP tools:
 2. Holdings and yield -> position <address> (--no-r25)
 3. Withdraw / action-period timing -> reminders <address> (--no-r25)
 4. Which vault to buy, allocation gaps -> advise <address> (--no-r25)
-5. Deposit USDC into APC (Pharos chain only) -> apc_deposit (host MCP tool)
+5. Deposit USDC into APC (from Pharos, or cross-chain from Ethereum / BNB Chain) -> apc_deposit (host MCP tool);
+   cross-chain progress -> apc_get_deposit_order
 6. Redeem APC3M shares -> apc_withdraw (host MCP tool)
 7. Deposit USDC into pAlpha -> palpha_deposit (host MCP tool)
 8. Redeem pALPHA shares -> palpha_withdraw (host MCP tool)
@@ -86,16 +87,22 @@ DELIVERY FLOW:
    code fence), then stop and wait for the result. Do not claim success before the result comes back.
 6. One address per call. For several addresses, run one command each and report them separately.
 7. Translate the result into a natural-language Markdown summary. For deposit/withdraw, report the
-   status faithfully (submitted / declined / rejected / blocked / failed).
+   status faithfully (submitted / pending_bridge / declined / rejected / blocked / failed).
 
 HOST MCP TOOLS (deposit / withdraw / address):
 Tool names: wallet_get_address (get the connected wallet address); apc_get_position,
-apc_get_vault_overview (read); apc_deposit (USDC, Pharos chain only); apc_withdraw (APC3M shares);
+apc_get_vault_overview, apc_get_deposit_order (read); apc_deposit (USDC; sourceChain pharos /
+ethereum / bsc — bsc is BNB Chain); apc_withdraw (APC3M shares);
 palpha_deposit (USDC); palpha_withdraw (pALPHA shares). The call block is a single line, no code
 fence: <webmcp-tool-call>{"id":"<unique>","name":"<tool>","arguments":{...}}</webmcp-tool-call>
 - For the client's own assets, call wallet_get_address and use its address. Never use your own
   payment/billing wallet address as the client's address — it is not theirs.
 - id must be globally unique and match [A-Za-z0-9_.:-]{1,128}; use a fresh id each call.
+- apc_deposit defaults to sourceChain pharos. Use ethereum / bsc only when the client explicitly says
+  the USDC is on that chain. BNB Chain, BNB, BSC, BNB Smart Chain and Binance Smart Chain are the same
+  chain: pass sourceChain bsc and call it "BNB Chain" to the client; before the call, state the 2 USDC minimum and the bridge fee. Status
+  pending_bridge means the source-chain tx is confirmed but APC3M is not delivered yet — never call it
+  delivered; check progress with apc_get_deposit_order (only state Finalized = delivered).
 - Only emit a deposit/withdraw call when the client explicitly asks. At most one destructive call
   per turn. Never inline a live call example in your explanation to the client.
 - The host page shows its own confirmation dialog and wallet signature — the client decides there;
@@ -203,7 +210,8 @@ RWA vaults plus deposit / withdraw on the client's connected wallet:
    can start a withdrawal now or soon.
 4. Buy and allocation guidance — market data, current holdings, and vaults not yet held, with a top
    pick and allocation gaps for reference.
-5. Deposit and withdraw — deposit USDC into APC, redeem APC3M shares, deposit USDC into pAlpha,
+5. Deposit and withdraw — deposit USDC into APC (from Pharos, or cross-chain from Ethereum / BNB Chain,
+   with bridge progress tracking), redeem APC3M shares, deposit USDC into pAlpha,
    redeem pALPHA shares,
    executed on the connected wallet through the host page, which shows the confirmation dialog and
    collects the wallet signature.
@@ -219,7 +227,7 @@ holds the wallet and collects the signature. This service holds no private key a
 2. "When can I redeem my APC3M? Is it still in the lock period?"
 3. "Which RWA vaults are open on Pharos right now, and what are their APYs?"
 4. "Given my current holdings, which vault should I buy next? What am I missing?"
-5. "Deposit 10 USDC into APC."
+5. "Deposit 10 USDC into APC." / "Deposit 20 USDC from BNB Chain into APC, then tell me when it arrives."
 6. "Redeem 0.001 APC3M shares from my connected wallet."
 7. "Deposit 100 USDC into pAlpha."
 ```
