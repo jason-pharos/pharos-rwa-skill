@@ -1,4 +1,4 @@
-import type { Position, R25Tranche, VaultId } from '../types.ts';
+import type { EpochView, Position, R25Tranche, VaultId } from '../types.ts';
 
 export type Urgency =
   | 'open' | 'opening-soon' | 'closing-soon' | 'future' | 'closed' | 'unknown'
@@ -7,6 +7,8 @@ export type Urgency =
 
 export interface Reminder {
   vault: VaultId;
+  /** Epoch id (APC3M / pALPHA); absent for non-epoch vaults. */
+  epoch?: string;
   urgency: Urgency;
   message: string;
   actionPeriod: Position['actionPeriod'];
@@ -46,7 +48,7 @@ function trancheNote(tranches: R25Tranche[] | undefined): string {
   return ` ${tranches.length} tranches totalling ${fmt(totalShares)} share(s); nearest expires ${next.expirationDate} (${next.daysUntilExpiration}d), latest ${tranches[tranches.length - 1]!.expirationDate}.`;
 }
 
-function messageFor(vault: VaultId, u: Urgency, ap: Position['actionPeriod'], tranches?: R25Tranche[]): string {
+function messageFor(vault: string, u: Urgency, ap: Position['actionPeriod'], tranches?: R25Tranche[]): string {
   const r = ap.redeemable;
   const tn = trancheNote(tranches);
   const isR25 = ap.source === 'r25-api';
@@ -68,9 +70,44 @@ function messageFor(vault: VaultId, u: Urgency, ap: Position['actionPeriod'], tr
   }
 }
 
+function pct(n: number): string {
+  return `${Number((n * 100).toFixed(2))}%`;
+}
+
+/** "Oct 27, 09:00 UTC+8" */
+function fmtUtc8(iso: string): string {
+  const s = new Date(Date.parse(iso)).toLocaleString('en-US', {
+    timeZone: 'Asia/Shanghai', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  });
+  return `${s} UTC+8`;
+}
+
+/**
+ * One reminder per live epoch. The current epoch keeps the position's action
+ * period (R25 first for APC3M); later epochs use their own config dates.
+ */
+function epochReminders(p: Position, epochs: EpochView[]): Reminder[] {
+  if (epochs.length === 0) {
+    return [{ vault: p.vault, urgency: 'unknown', message: `${p.vault}: no active epoch configured; config may be stale.`, actionPeriod: p.actionPeriod }];
+  }
+  return epochs.map((e) => {
+    const ap = e.role === 'current' ? p.actionPeriod : e.actionPeriod;
+    const urgency = classify(ap);
+    const who = `${p.vault} ${e.label}`;
+    let message = urgency === 'closed'
+      ? `${who}: withdraw window for this epoch has closed; holdings roll over into the next epoch after ${fmtUtc8(e.withdrawable)}.`
+      : messageFor(who, urgency, ap, p.r25?.tranches);
+    if (e.deposit?.isOpen && e.currentTerms) {
+      message += ` Deposit open until ${fmtUtc8(e.deposit.end)} (${e.currentTerms.label} net APY ${pct(e.currentTerms.netApy)}).`;
+    }
+    return { vault: p.vault, epoch: e.id, urgency, message, actionPeriod: ap };
+  });
+}
+
 export function buildReminders(positions: Position[]): Reminder[] {
-  return positions.map((p) => {
+  return positions.flatMap((p) => {
+    if (p.epochs) return epochReminders(p, p.epochs);
     const urgency = classify(p.actionPeriod);
-    return { vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod, p.r25?.tranches), actionPeriod: p.actionPeriod };
+    return [{ vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod, p.r25?.tranches), actionPeriod: p.actionPeriod }];
   });
 }

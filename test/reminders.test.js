@@ -65,3 +65,50 @@ test('locked wording: async (SemiYearly) adds request-ahead note; sync (Weekly) 
   assert.doesNotMatch(syncRem.message, /request/i);
   assert.match(syncRem.message, /7 days/);
 });
+
+const apCfg = (o) => ({ source: 'config', start: null, end: null, startTs: null, endTs: null, withdrawableDate: null, isOpen: false, opensInDays: null, closesInDays: null, stale: false, ...o });
+const P3_TERMS = { from: '2026-10-20T15:00:00+08:00', label: 'Deposit Period', grossApy: 0.138, performanceFeeRate: 0, netApy: 0.138 };
+const view = (o) => ({
+  id: 'palpha-p3', label: 'Phase 3', role: 'next', status: 'deposit-open',
+  deposit: { start: '2026-10-20T15:00:00+08:00', end: '2026-10-27T09:00:00+08:00', isOpen: true },
+  lockStart: '2026-10-20T15:00:00+08:00', lockEnd: '2027-01-21T15:00:00+08:00',
+  actionPeriod: apCfg({ opensInDays: 59 }), withdrawable: '2027-01-21T15:00:00+08:00',
+  currentTerms: P3_TERMS, terms: [P3_TERMS], ...o,
+});
+
+test('epoch-based position: one reminder per live epoch', () => {
+  const current = view({
+    id: 'palpha-p2', label: 'Phase 2', role: 'current', status: 'locked', deposit: null,
+    withdrawable: '2026-10-20T19:00:00+08:00', actionPeriod: apCfg({ stale: true }),
+    currentTerms: null, terms: [],
+  });
+  const p = { ...mk('pALPHA', apCfg({ stale: true })), epochs: [current, view({})] };
+  const r = buildReminders([p]);
+  assert.equal(r.length, 2);
+  assert.deepEqual(r.map((x) => [x.epoch, x.urgency]), [['palpha-p2', 'closed'], ['palpha-p3', 'future']]);
+  assert.match(r[0].message, /^pALPHA Phase 2: withdraw window for this epoch has closed; holdings roll over into the next epoch after Oct 20, 19:00 UTC\+8\.$/);
+  assert.match(r[1].message, /^pALPHA Phase 3: withdraw window opens in 59 day\(s\)\. Deposit open until Oct 27, 09:00 UTC\+8 \(Deposit Period net APY 13\.8%\)\.$/);
+});
+
+test('current epoch uses the position action period (R25 first), next uses its own', () => {
+  const current = view({ id: 'apc-s1', label: 'Season 1', role: 'current', status: 'locked', deposit: null, actionPeriod: apCfg({ stale: true }) });
+  const p = { ...mk('APC3M', apCfg({ source: 'r25-api', isOpen: true, closesInDays: 20 })), epochs: [current] };
+  const [rem] = buildReminders([p]);
+  assert.equal(rem.urgency, 'open');
+  assert.equal(rem.actionPeriod.source, 'r25-api');
+});
+
+test('deposit suffix omitted without terms', () => {
+  const p = { ...mk('pALPHA', apCfg({})), epochs: [view({ role: 'current', currentTerms: null, terms: [] })] };
+  const [rem] = buildReminders([p]);
+  assert.doesNotMatch(rem.message, /Deposit open/);
+});
+
+test('epoch-based position with no live epoch → single unknown reminder', () => {
+  const p = { ...mk('APC3M', apCfg({ source: 'unavailable' })), epochs: [] };
+  const r = buildReminders([p]);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].urgency, 'unknown');
+  assert.equal(r[0].message, 'APC3M: no active epoch configured; config may be stale.');
+  assert.equal(r[0].epoch, undefined);
+});
