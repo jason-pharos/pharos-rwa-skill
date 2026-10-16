@@ -5,10 +5,13 @@ import { computePAlphaPosition } from '../src/logic/position-palpha.ts';
 const entry = {
   id: 'pALPHA', entryNavBaseline: 1.0, apyFallback: 0.14,
   emberVaultId: '1502a2c9-3ea1-4f0d-b513-fb79e3dbbe1f',
-  actionPeriodConfig: {
+  epochs: [{
+    id: 'palpha-p2', label: 'Phase 2',
     lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-20T19:00:00+08:00',
-    actionStart: '2026-09-17T11:00:00+08:00', actionEnd: '2026-10-01T00:00:00+08:00', withdrawable: '2026-10-20',
-  },
+    actionStart: '2026-09-17T11:00:00+08:00', actionEnd: '2026-10-01T00:00:00+08:00',
+    withdrawable: '2026-10-20T19:00:00+08:00',
+    terms: [{ from: '2026-07-20T00:00:00+08:00', label: 'Phase 2', grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 }],
+  }],
 };
 const ap = { source: 'config', start: null, end: null, startTs: null, endTs: null, withdrawableDate: '2026-10-20', isOpen: false, opensInDays: null, closesInDays: null, stale: false };
 const now = Math.floor(Date.parse('2026-07-27T00:00:00+08:00') / 1000);
@@ -64,9 +67,11 @@ test('expectedTotalYield projects earned-to-date forward to lock end', () => {
   assert.equal(p.assumptions.expectedYieldBasis, 'earned-to-date + apy x time-to-lock-end');
 });
 
-test('after lock end there is no time left to project — expected == earned', () => {
+test('no live epoch (past withdrawable) → no lock data, no projection', () => {
   const p = computePAlphaPosition({ ...base, now: Math.floor(Date.parse('2026-11-01T00:00:00+08:00') / 1000) });
-  assert.ok(Math.abs(p.expectedTotalYield - p.realizedYield) < 1e-9);
+  assert.equal(p.lockEnd, null);
+  assert.equal(p.expectedTotalYield, null);
+  assert.deepEqual(p.epochs, []);
 });
 
 test('shares / nav / lock timing stay on-chain + config sourced', () => {
@@ -76,6 +81,7 @@ test('shares / nav / lock timing stay on-chain + config sourced', () => {
   assert.equal(p.assumptions.navResolvedFrom, 'onchain');
   assert.equal(p.depositedDurationDays, 7);
   assert.equal(p.lockEnd, '2026-10-20T19:00:00+08:00');
+  assert.deepEqual(p.epochs.map((e) => e.id), ['palpha-p2']);
 });
 
 test('unparseable API money fields degrade to null instead of NaN', () => {

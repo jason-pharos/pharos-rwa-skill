@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computePosition, configApy, resolveDepositPeriod } from '../src/logic/position.ts';
+import { computePosition } from '../src/logic/position.ts';
 
-const entry = {
-  id: 'APC3M', entryNavBaseline: 1.0, apyFallback: 0.14,
-  actionPeriodConfig: {
-    lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-20T23:59:59+08:00',
-    actionStart: '2026-07-20T00:00:00+08:00', actionEnd: '2026-10-16T00:00:00+08:00', withdrawable: '2026-10-20',
-  },
+const S1 = {
+  id: 'apc-s1', label: 'Season 1',
+  lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-20T23:59:59+08:00',
+  actionStart: '2026-07-20T00:00:00+08:00', actionEnd: '2026-10-16T00:00:00+08:00',
+  withdrawable: '2026-10-20T23:59:59+08:00',
+  terms: [{ from: '2026-07-20T00:00:00+08:00', label: 'Season 1', grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 }],
 };
+const entry = { id: 'APC3M', entryNavBaseline: 1.0, apyFallback: 0.14, epochs: [S1] };
 const ap = { source: 'config', start: null, end: null, startTs: null, endTs: null, withdrawableDate: '2026-10-20', isOpen: false, opensInDays: null, closesInDays: null, stale: false };
 
 test('computes current value, principal, realized yield', () => {
@@ -33,10 +34,13 @@ test('expectedTotalYield projects earned-to-date forward to lock end', () => {
   assert.equal(p.assumptions.expectedYieldBasis, 'earned-to-date + apy x time-to-lock-end');
 });
 
-test('after lock end there is no time left to project — expected == earned', () => {
+test('no live epoch (past withdrawable) → no lock data, no projection', () => {
   const now = Math.floor(Date.parse('2026-11-01T00:00:00+08:00') / 1000);
   const p = computePosition({ entry, sharesHuman: '100', nav: 1.03, apy: 0.14, actionPeriod: ap, now });
-  assert.ok(Math.abs(p.expectedTotalYield - p.realizedYield) < 1e-9);
+  assert.equal(p.lockEnd, null);
+  assert.equal(p.depositedDurationDays, null);
+  assert.equal(p.expectedTotalYield, null);
+  assert.deepEqual(p.epochs, []);
 });
 
 test('no NAV → projection falls back to principal, still reported', () => {
@@ -64,35 +68,27 @@ test('computePosition navResolvedFrom defaults to onchain', () => {
   assert.equal(p.assumptions.navResolvedFrom, 'onchain');
 });
 
-test('resolveDepositPeriod: one window (Pre + Extend), phase per segment', () => {
-  const e = { apyFallback: 0.14, depositPeriodConfig: {
-    preStart: '2026-10-13T00:00:00+08:00', preEnd: '2026-10-20T15:00:00+08:00', extendEnd: '2026-10-27T09:00:00+08:00',
-    pre: { grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
-    extend: { grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
-  } };
-  const at = (iso) => resolveDepositPeriod(e, Math.floor(Date.parse(iso) / 1000));
-  assert.equal(at('2026-10-12T00:00:00+08:00').phase, 'upcoming');
-  assert.equal(at('2026-10-12T00:00:00+08:00').isOpen, false);
-  assert.equal(at('2026-10-16T00:00:00+08:00').phase, 'pre');
-  assert.equal(at('2026-10-20T15:00:00+08:00').phase, 'extend');
-  assert.equal(at('2026-10-20T15:00:00+08:00').isOpen, true);
-  assert.equal(at('2026-10-27T09:00:00+08:00').phase, 'closed');
-  const dp = at('2026-10-16T00:00:00+08:00');
-  assert.equal(dp.start, '2026-10-13T00:00:00+08:00');
-  assert.equal(dp.end, '2026-10-27T09:00:00+08:00');
-  assert.deepEqual(dp.segments.map((s) => [s.phase, s.netApy, s.performanceFeeRate]), [['pre', 0.13, 0], ['extend', 0.125, 0.1]]);
-  assert.equal(resolveDepositPeriod({}, 0), null);
+test('overlapping epochs: current drives lock timing, all live epochs attached', () => {
+  const S2 = {
+    id: 'apc-s2', label: 'Season 2',
+    deposit: { start: '2026-10-13T00:00:00+08:00', end: '2026-10-27T09:00:00+08:00' },
+    lockStart: '2026-10-20T15:00:00+08:00', lockEnd: '2027-01-21T15:00:00+08:00',
+    actionStart: '2026-10-13T00:00:00+08:00', actionEnd: '2027-01-13T00:00:00+08:00',
+    withdrawable: '2027-01-21T15:00:00+08:00',
+    terms: [{ from: '2026-10-13T00:00:00+08:00', label: 'Deposit Period (Pre)', grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 }],
+  };
+  const now = Math.floor(Date.parse('2026-10-16T00:00:00+08:00') / 1000);
+  const p = computePosition({ entry: { ...entry, epochs: [S2, S1] }, sharesHuman: '100', nav: 1.03, apy: null, actionPeriod: ap, now });
+  assert.equal(p.lockEnd, '2026-10-20T23:59:59+08:00');
+  assert.deepEqual(p.epochs.map((e) => [e.id, e.role]), [['apc-s1', 'current'], ['apc-s2', 'next']]);
+  // apy null → current epoch's net APY (S1: 0.14)
+  const yearsLeft = (Date.parse('2026-10-20T23:59:59+08:00') - Date.parse('2026-10-16T00:00:00+08:00')) / 1000 / 31557600;
+  assert.ok(Math.abs(p.expectedTotalYield - (3 + 103 * 0.14 * yearsLeft)) < 1e-6);
 });
 
-test('configApy: Pre net APY before preEnd, Extend net APY after (rest of lock too)', () => {
-  const e = { apyFallback: 0.14, depositPeriodConfig: {
-    preStart: '2026-10-13T00:00:00+08:00', preEnd: '2026-10-20T15:00:00+08:00', extendEnd: '2026-10-27T09:00:00+08:00',
-    pre: { grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
-    extend: { grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
-  } };
-  const sec = (iso) => Math.floor(Date.parse(iso) / 1000);
-  assert.equal(configApy(e, sec('2026-10-16T00:00:00+08:00')), 0.13);
-  assert.equal(configApy(e, sec('2026-10-22T00:00:00+08:00')), 0.125);
-  assert.equal(configApy(e, sec('2026-12-01T00:00:00+08:00')), 0.125);
-  assert.equal(configApy({ apyFallback: 0.14 }, 0), 0.14);
+test('vault without epochs → no epochs field', () => {
+  const now = Math.floor(Date.parse('2026-07-27T00:00:00+08:00') / 1000);
+  const p = computePosition({ entry: { id: 'VRPC-Weekly', entryNavBaseline: 1, apyFallback: 0.1 }, sharesHuman: '1', nav: 1, apy: 0.1, actionPeriod: ap, now });
+  assert.equal(p.epochs, undefined);
+  assert.equal(p.lockEnd, null);
 });

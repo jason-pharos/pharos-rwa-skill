@@ -3,8 +3,9 @@ import { loadRegistry } from './config/remoteConfig.ts';
 import { fetchHarbor } from './sources/harbor.ts';
 import { fetchR25VaultList, fetchR25Holdings, fetchR25VaultPeriod, fetchR25Positions, fetchR25Activity, type R25HoldingItem, type R25VaultPeriod, type R25Positions, type R25ActivityItem } from './sources/r25.ts';
 import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getVaultNavOnchain, getRedeemability, type RawRedeemability } from './sources/chain.ts';
-import { resolveActionPeriod, resolveRedeemableActionPeriod, resolveR25ActionPeriod, resolveR25TrancheActionPeriod } from './logic/actionPeriod.ts';
-import { computePosition, configApy } from './logic/position.ts';
+import { resolveRedeemableActionPeriod, resolveR25ActionPeriod, resolveR25TrancheActionPeriod } from './logic/actionPeriod.ts';
+import { computePosition } from './logic/position.ts';
+import { epochApy, resolveActionPeriod, resolveEpochs } from './logic/epochs.ts';
 import { computePAlphaPosition } from './logic/position-palpha.ts';
 import { fetchEmberPositionValue } from './sources/ember.ts';
 import { buildReminders, type Reminder } from './logic/reminders.ts';
@@ -82,21 +83,21 @@ type NavResult = { nav: number | null; apy: number; navResolvedFrom: 'onchain' |
  *  - NAV is ALWAYS read on-chain (ERC4626 convertToAssets via entry.onchainNav).
  *    A read failure degrades to nav:null (position still shows shares/principal)
  *    rather than dropping the whole position.
- *  - APY comes from the registry (configApy: current deposit segment's net APY,
- *    else entry.apyFallback), maintained per epoch via
+ *  - APY comes from the registry (epochApy: the current epoch's active net
+ *    APY, else entry.apyFallback), maintained per epoch via
  *    remote config. The vault-info API is no longer used here — its data is
  *    mostly unmaintained, and everything position needs is on-chain or in the
  *    registry.
- * Action period comes solely from actionPeriodConfig (see resolveActionPeriod).
+ * Action period comes from the current epoch (see logic/epochs.ts).
  */
 async function navFor(entry: VaultRegistryEntry, provider: ReturnType<typeof makeProvider>, deps: PositionDeps, now: number): Promise<NavResult> {
   const { vault, shareDecimals, assetDecimals } = entry.onchainNav;
   try {
     const nav = await deps.getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
-    return { nav, apy: configApy(entry, now), navResolvedFrom: 'onchain' };
+    return { nav, apy: epochApy(entry, now), navResolvedFrom: 'onchain' };
   } catch {
     // NAV read failed → degrade gracefully; principal/shares still reported.
-    return { nav: null, apy: configApy(entry, now), navResolvedFrom: 'none' };
+    return { nav: null, apy: epochApy(entry, now), navResolvedFrom: 'none' };
   }
 }
 
@@ -259,7 +260,7 @@ async function fetchR25Data(
 
   // Dynamic action-period dates for WINDOWED R25 vaults (APC3M).
   for (const entry of registry) {
-    if (!entry.r25VaultId || !entry.actionPeriodConfig) continue;
+    if (!entry.r25VaultId || !entry.epochs) continue;
     try {
       const period = await deps.fetchR25VaultPeriod(entry.r25VaultId);
       if (period) periods.set(entry.r25VaultId, period);
@@ -339,6 +340,8 @@ export async function buildPositions(
 
   await Promise.allSettled(registry.map(async (entry) => {
     try {
+      // resolveEpochs skips misconfigured epochs; surface them once per vault.
+      for (const err of resolveEpochs(entry, now).errors) errors.push(err);
       // Sum share/receipt-token balance across ALL of the vault's chains
       // (pALPHA = Pharos + Ethereum; APC3M = Pharos only). The --rpc/opts.rpc
       // override applies to the Pharos chain (its documented meaning).
@@ -407,7 +410,7 @@ export async function buildPositions(
         nav = Number(r25h.nav) || null;
         // Effective APY = base APY + boost APY (e.g. TopNod +3%).
         // The boost is what the user actually earns through their purchase channel.
-        const baseApy = Number(r25h.apy) || configApy(entry, now);
+        const baseApy = Number(r25h.apy) || epochApy(entry, now);
         const boostApy = r25h.boostInfo ? (Number(r25h.boostInfo.boostApy) || 0) : 0;
         apy = baseApy + boostApy;
         navResolvedFrom = 'r25-api';

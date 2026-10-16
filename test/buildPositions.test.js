@@ -28,11 +28,13 @@ const PALPHA = {
   onchainNav: { vault: '0xE47E9bA4EA2320A6ed87246d02Fd5C38485Ed7d1', shareDecimals: 6, assetDecimals: 6 },
   entryNavBaseline: 1.0,
   apyFallback: 0.14,
-  actionPeriodConfig: {
+  epochs: [{
+    id: 'palpha-p2', label: 'Phase 2',
     lockStart: '2026-07-20T19:00:00+08:00', lockEnd: '2026-10-20T19:00:00+08:00',
     actionStart: '2026-09-17T11:00:00+08:00', actionEnd: '2026-10-01T00:00:00+08:00',
-    withdrawable: '2026-10-20',
-  },
+    withdrawable: '2026-10-20T19:00:00+08:00',
+    terms: [{ from: '2026-07-20T19:00:00+08:00', label: 'Phase 2', grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 }],
+  }],
 };
 
 const APC3M = {
@@ -45,11 +47,13 @@ const APC3M = {
   onchainNav: { vault: '0xD0428799FbC35557834d33121BA4472692c8908a', shareDecimals: 18, assetDecimals: 6 },
   entryNavBaseline: 1.0,
   apyFallback: 0.14,
-  actionPeriodConfig: {
+  epochs: [{
+    id: 'apc-s1', label: 'Season 1',
     lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-20T23:59:59+08:00',
     actionStart: '2026-07-20T00:00:00+08:00', actionEnd: '2026-10-16T00:00:00+08:00',
-    withdrawable: '2026-10-20',
-  },
+    withdrawable: '2026-10-20T23:59:59+08:00',
+    terms: [{ from: '2026-07-20T00:00:00+08:00', label: 'Season 1', grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 }],
+  }],
 };
 
 const EMBER_POSITION = {
@@ -169,4 +173,15 @@ test('a vault with no shares, no R25 holding and no Ember data is still skipped'
   const errors = [];
   const positions = await buildPositions(ADDR, { noRemote: true, now: NOW }, errors, deps);
   assert.deepEqual(positions, []);
+});
+
+test('a misconfigured epoch is reported but the position is still built', async () => {
+  const bad = { ...PALPHA.epochs[0], id: 'bad', lockStart: 'not-a-date' };
+  const errors = [];
+  const deps = okDeps({ registry: [{ ...PALPHA, epochs: [...PALPHA.epochs, bad] }, APC3M] });
+  const positions = await buildPositions(ADDR, { noRemote: true, now: NOW }, errors, deps);
+  const pa = positions.find((p) => p.vault === 'pALPHA');
+  assert.ok(pa, 'pALPHA position still present');
+  assert.deepEqual(pa.epochs.map((e) => e.id), ['palpha-p2']);
+  assert.ok(errors.some((e) => e.scope === 'epochs:bad'), JSON.stringify(errors));
 });

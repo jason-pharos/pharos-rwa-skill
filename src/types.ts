@@ -71,30 +71,6 @@ export interface VaultRegistryEntry {
    */
   r25VaultId?: string;
   /**
-   * Fixed withdraw-window dates (APC3M, pALPHA). Absent for redeemability-based
-   * vaults (VRPC-SemiYearly), whose action period comes from the contract.
-   */
-  actionPeriodConfig?: {
-    lockStart: string;         // ISO8601 with tz
-    lockEnd: string;
-    actionStart: string;
-    actionEnd: string;
-    withdrawable: string;      // ISO date
-  };
-  /**
-   * Fixed deposit window (APC3M): Deposit Period = preStart~extendEnd, split
-   * into Pre (preStart~preEnd) and Extend (preEnd~extendEnd) only because the
-   * two segments carry different APY / performance fee. Absent for other vaults.
-   */
-  depositPeriodConfig?: {
-    preStart: string;          // ISO8601 with tz
-    preEnd: string;            // = Extend start = lock start
-    extendEnd: string;         // = deposit end
-    pre: DepositPhaseTerms;
-    /** Also applies after the deposit window closes (rest of the lock). */
-    extend: DepositPhaseTerms;
-  };
-  /**
    * Operating periods of a windowed vault (APC Season N, pALPHA Phase N).
    * Every epoch not yet past `withdrawable` is reported; see logic/epochs.ts.
    */
@@ -146,25 +122,6 @@ export interface EpochView {
   currentTerms: EpochTerms | null;
   /** All tiers, sorted by `from`. */
   terms: EpochTerms[];
-}
-
-/** APY / fee terms of one deposit-period segment. All decimals. */
-export interface DepositPhaseTerms {
-  grossApy: number;            // e.g. 0.138
-  /** Share of the deposit APY (not rewards) taken as performance fee, e.g. 0.1. */
-  performanceFeeRate: number;
-  netApy: number;              // after performance fee, e.g. 0.125
-}
-
-export type DepositPhase = 'upcoming' | 'pre' | 'extend' | 'closed';
-
-/** Deposit window state for vaults with depositPeriodConfig (APC3M). */
-export interface DepositPeriod {
-  start: string;               // Deposit Period start (= Pre start)
-  end: string;                 // Deposit Period end (= Extend end)
-  isOpen: boolean;
-  phase: DepositPhase;
-  segments: Array<{ phase: 'pre' | 'extend'; start: string; end: string } & DepositPhaseTerms>;
 }
 
 export type ActionPeriodSource = 'config' | 'onchain-redeemable' | 'r25-api' | 'unavailable';
@@ -270,8 +227,8 @@ export interface Position {
   lockEnd: string | null;
   expectedTotalYield: number | null;
   actionPeriod: ActionPeriod;
-  /** Present only for vaults with depositPeriodConfig (APC3M). */
-  depositPeriod?: DepositPeriod;
+  /** Live epochs (APC3M, pALPHA); present iff the vault is epoch-based. */
+  epochs?: EpochView[];
   /** Present only for R25 vaults with API data (holdings endpoint). */
   r25?: R25HoldingInfo;
 }

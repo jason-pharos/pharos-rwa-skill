@@ -24,26 +24,40 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     entryNavBaseline: 1.0,
     apyFallback: 0.14,
     r25VaultId: 'APC3M',
-    // APC Season 2 (matches omni-port-fe getApcSeason2Window defaults).
-    // Lock starts when Deposit Period (Pre) ends; Extend deposits overlap the lock.
-    actionPeriodConfig: {
-      lockStart: '2026-10-20T15:00:00+08:00',
-      lockEnd: '2027-01-21T15:00:00+08:00',
-      actionStart: '2026-10-13T00:00:00+08:00',
-      actionEnd: '2027-01-13T00:00:00+08:00',
-      withdrawable: '2027-01-21',
-    },
-    // Deposit Period = Pre + Extend; split only for the different APY / fee:
-    // Pre 13% (≈0% deposit APY + ≈13% USDC rewards), no performance fee;
-    // Extend (and the rest of the lock) 13.8% gross (13% deposit + 0.8% rewards),
-    // 10% performance fee on the deposit APY → 12.5% net.
-    depositPeriodConfig: {
-      preStart: '2026-10-13T00:00:00+08:00',
-      preEnd: '2026-10-20T15:00:00+08:00',
-      extendEnd: '2026-10-27T09:00:00+08:00',
-      pre: { grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
-      extend: { grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
-    },
+    // Operating periods (UTC+8) from omni-port-fe: S1 = apps/port/.env prod
+    // values, S2 = APC_SEASON2_DEFAULTS + SEASON2_APY. Every epoch not yet past
+    // `withdrawable` is reported (logic/epochs.ts). New season → append an epoch.
+    // S2 "Deposit Period (Pre)" / "(Extend)" are two APY/fee tiers of ONE
+    // deposit window, hence two `terms` entries rather than two windows.
+    epochs: [
+      {
+        id: 'apc-s1',
+        label: 'Season 1',
+        deposit: { start: '2026-07-15T16:00:00+08:00', end: '2026-07-19T23:59:00+08:00' },
+        lockStart: '2026-07-20T00:00:00+08:00',
+        lockEnd: '2026-10-20T23:59:59+08:00',
+        actionStart: '2026-07-20T00:00:00+08:00',
+        actionEnd: '2026-10-12T00:00:00+08:00',
+        withdrawable: '2026-10-20T23:59:59+08:00',
+        terms: [
+          { from: '2026-07-15T16:00:00+08:00', label: 'Season 1', grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 },
+        ],
+      },
+      {
+        id: 'apc-s2',
+        label: 'Season 2',
+        deposit: { start: '2026-10-13T00:00:00+08:00', end: '2026-10-27T09:00:00+08:00' },
+        lockStart: '2026-10-20T15:00:00+08:00',
+        lockEnd: '2027-01-21T15:00:00+08:00',
+        actionStart: '2026-10-13T00:00:00+08:00',
+        actionEnd: '2027-01-13T00:00:00+08:00',
+        withdrawable: '2027-01-21T15:00:00+08:00',
+        terms: [
+          { from: '2026-10-13T00:00:00+08:00', label: 'Deposit Period (Pre)', grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
+          { from: '2026-10-20T15:00:00+08:00', label: 'Deposit Period (Extend) & Lock', grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
+        ],
+      },
+    ],
   },
   {
     id: 'pALPHA',
@@ -84,17 +98,38 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     },
     entryNavBaseline: 1.0,
     apyFallback: 0.14,
-    // pAlpha phase 3 (matches omni-port-fe PALPHA_PHASE3_WINDOW): deposit
-    // 10-20 15:00 → 10-27 09:00, lock 10-20 15:00 → 2027-01-21 15:00. The
-    // action period (12-18 11:00 → 2027-01-01 11:00) is the withdraw-REQUEST
-    // window inside the lock — it is NOT the lock end or the withdrawable date.
-    actionPeriodConfig: {
-      lockStart: '2026-10-20T15:00:00+08:00',
-      lockEnd: '2027-01-21T15:00:00+08:00',
-      actionStart: '2026-12-18T11:00:00+08:00',
-      actionEnd: '2027-01-01T11:00:00+08:00',
-      withdrawable: '2027-01-21',
-    },
+    // Operating periods (UTC+8). P2 = previous skill config (deposit window
+    // unknown); P3 = omni-port-fe PALPHA_PHASE3_WINDOW / PALPHA_PHASE3_APY
+    // (performance fee waived while deposits are open). The action period is the
+    // withdraw-REQUEST window inside the lock — not the lock end.
+    epochs: [
+      {
+        id: 'palpha-p2',
+        label: 'Phase 2',
+        lockStart: '2026-07-20T19:00:00+08:00',
+        lockEnd: '2026-10-20T19:00:00+08:00',
+        actionStart: '2026-09-17T11:00:00+08:00',
+        actionEnd: '2026-10-01T00:00:00+08:00',
+        withdrawable: '2026-10-20T19:00:00+08:00',
+        terms: [
+          { from: '2026-07-20T19:00:00+08:00', label: 'Phase 2', grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 },
+        ],
+      },
+      {
+        id: 'palpha-p3',
+        label: 'Phase 3',
+        deposit: { start: '2026-10-20T15:00:00+08:00', end: '2026-10-27T09:00:00+08:00' },
+        lockStart: '2026-10-20T15:00:00+08:00',
+        lockEnd: '2027-01-21T15:00:00+08:00',
+        actionStart: '2026-12-18T11:00:00+08:00',
+        actionEnd: '2027-01-01T11:00:00+08:00',
+        withdrawable: '2027-01-21T15:00:00+08:00',
+        terms: [
+          { from: '2026-10-20T15:00:00+08:00', label: 'Deposit Period', grossApy: 0.138, performanceFeeRate: 0, netApy: 0.138 },
+          { from: '2026-10-27T09:00:00+08:00', label: 'Lock Period', grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
+        ],
+      },
+    ],
   },
   {
     id: 'VRPC-SemiYearly',
@@ -133,7 +168,7 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     entryNavBaseline: 1.0,
     apyFallback: 0.15,
     r25VaultId: 'VRPCS',
-    // no actionPeriodConfig — see redeemability above.
+    // no epochs — see redeemability above.
   },
   {
     id: 'VRPC-Weekly',
@@ -169,6 +204,6 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     entryNavBaseline: 1.0,
     apyFallback: 0.08,
     r25VaultId: 'VRPCW',
-    // no actionPeriodConfig — see redeemability above.
+    // no epochs — see redeemability above.
   },
 ];

@@ -1,7 +1,7 @@
 import type { ActionPeriod, Redeemable, VaultRegistryEntry } from '../types.ts';
 import type { RawRedeemability } from '../sources/chain.ts';
 import type { R25VaultPeriod, R25Positions } from '../sources/r25.ts';
-import { isoToSec, secToIso, windowState } from '../util/time.ts';
+import { secToIso, windowState } from '../util/time.ts';
 
 export function buildActionPeriod(startTs: number | null, endTs: number | null, withdrawableTs: number | null, source: ActionPeriod['source'], now: number): ActionPeriod {
   if (startTs === null || endTs === null) {
@@ -22,24 +22,8 @@ export function buildActionPeriod(startTs: number | null, endTs: number | null, 
 }
 
 /**
- * Config-based action period (APC3M, pALPHA): a fixed withdraw window from the
- * per-epoch configured dates (maintained in the registry / config/vaults.json).
- * Vaults without actionPeriodConfig (redeemability-based, e.g. VRPC-SemiYearly)
- * are handled by resolveRedeemableActionPeriod instead.
- */
-export function resolveActionPeriod(entry: VaultRegistryEntry, now: number): ActionPeriod {
-  const cfg = entry.actionPeriodConfig;
-  if (!cfg) return buildActionPeriod(null, null, null, 'unavailable', now);
-  const startTs = isoToSec(cfg.actionStart);
-  const endTs = isoToSec(cfg.actionEnd);
-  const wTs = isoToSec(cfg.withdrawable);
-  if (startTs !== null && endTs !== null) return buildActionPeriod(startTs, endTs, wTs, 'config', now);
-  return buildActionPeriod(null, null, null, 'unavailable', now);
-}
-
-/**
  * R25-API-based action period (APC3M): dynamic window dates from the R25
- * /dapp/vault/period endpoint. Replaces hardcoded actionPeriodConfig when the
+ * /dapp/vault/period endpoint. Replaces the registry epoch dates when the
  * API is reachable; falls back to config otherwise.
  */
 export function resolveR25ActionPeriod(period: R25VaultPeriod, now: number): ActionPeriod {

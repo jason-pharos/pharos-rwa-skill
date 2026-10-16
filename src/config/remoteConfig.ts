@@ -1,4 +1,4 @@
-import type { DepositPhaseTerms, VaultRegistryEntry } from '../types.ts';
+import type { VaultRegistryEntry } from '../types.ts';
 import { DEFAULT_REGISTRY } from './registry.ts';
 import { fetchJson } from '../util/http.ts';
 import { readCache, writeCache } from '../util/cache.ts';
@@ -18,34 +18,13 @@ export function mergeRegistry(base: VaultRegistryEntry[], override: unknown): Va
   return base.map((entry) => {
     const patch = o.vaults.find((v) => v && v.id === entry.id);
     if (!patch) return entry;
-    // Only allow specific fields to be overridden from remote config.
-    // Identity/address fields (id, displayName, chainId, shareToken, balanceSources, onchainNav)
-    // are always taken from the base and protected from override.
-    const merged: VaultRegistryEntry = {
+    // Only policy values can be overridden remotely. Identity/address fields
+    // and epoch dates always come from the bundled registry.
+    return {
       ...entry,
       apyFallback: patch.apyFallback ?? entry.apyFallback,
       entryNavBaseline: patch.entryNavBaseline ?? entry.entryNavBaseline,
     };
-    // actionPeriodConfig is optional (absent for redeemability-based vaults);
-    // deep-merge the configured dates only when the base entry has them.
-    if (entry.actionPeriodConfig) {
-      merged.actionPeriodConfig = { ...entry.actionPeriodConfig, ...(patch.actionPeriodConfig ?? {}) };
-    }
-    if (entry.depositPeriodConfig) {
-      const base = entry.depositPeriodConfig;
-      // Remote patch may carry only some dates / some terms of a segment.
-      const p = (patch.depositPeriodConfig ?? {}) as Partial<Omit<typeof base, 'pre' | 'extend'>> & {
-        pre?: Partial<DepositPhaseTerms>;
-        extend?: Partial<DepositPhaseTerms>;
-      };
-      merged.depositPeriodConfig = {
-        ...base,
-        ...p,
-        pre: { ...base.pre, ...(p.pre ?? {}) },
-        extend: { ...base.extend, ...(p.extend ?? {}) },
-      };
-    }
-    return merged;
   });
 }
 

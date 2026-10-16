@@ -67,35 +67,62 @@ test('registry: both VRPC vaults are redeemability-based with correct lockDays',
   assert.equal(wk.redeemability.lockDays, 7);
   assert.equal(sy.redeemability.lockDays, 184);
   assert.equal(wk.redeemability.vault, '0x1c2bc8b553d9a7e61f7531a3a4bf2162f4569268');
-  assert.equal(wk.actionPeriodConfig, undefined); // no fixed dates
+  assert.equal(wk.epochs, undefined); // no fixed dates
   assert.equal(wk.onchainNav.assetDecimals, 6);
 });
 
-test('APC3M registry matches APC Season 2 windows; depositPeriodConfig overridable', () => {
-  const apc = DEFAULT_REGISTRY.find((v) => v.id === 'APC3M');
-  assert.equal(apc.actionPeriodConfig.actionStart, '2026-10-13T00:00:00+08:00');
-  assert.equal(apc.actionPeriodConfig.actionEnd, '2027-01-13T00:00:00+08:00');
-  assert.equal(apc.actionPeriodConfig.lockStart, '2026-10-20T15:00:00+08:00');
-  assert.equal(apc.actionPeriodConfig.lockEnd, '2027-01-21T15:00:00+08:00');
-  assert.equal(apc.depositPeriodConfig.preEnd, '2026-10-20T15:00:00+08:00');
-  const merged = mergeRegistry(DEFAULT_REGISTRY, {
-    version: 1,
-    vaults: [{ id: 'APC3M', depositPeriodConfig: { extendEnd: '2026-10-28T09:00:00+08:00', extend: { netApy: 0.12 } } }],
-  });
-  const m = merged.find((v) => v.id === 'APC3M');
-  assert.equal(m.depositPeriodConfig.extendEnd, '2026-10-28T09:00:00+08:00');
-  assert.equal(m.depositPeriodConfig.preStart, '2026-10-13T00:00:00+08:00'); // untouched
-  assert.equal(m.depositPeriodConfig.extend.netApy, 0.12);
-  assert.equal(m.depositPeriodConfig.extend.performanceFeeRate, 0.1); // nested terms deep-merged
+test('registry epochs: APC S1/S2 and pALPHA P2/P3 match omni-port-fe', () => {
+  const view = (id) => DEFAULT_REGISTRY.find((v) => v.id === id).epochs.map((e) => ({
+    id: e.id, deposit: e.deposit ?? null, lock: [e.lockStart, e.lockEnd], action: [e.actionStart, e.actionEnd],
+    withdrawable: e.withdrawable, terms: e.terms.map((t) => [t.from, t.grossApy, t.performanceFeeRate, t.netApy]),
+  }));
+  assert.deepEqual(view('APC3M'), [
+    {
+      id: 'apc-s1', deposit: { start: '2026-07-15T16:00:00+08:00', end: '2026-07-19T23:59:00+08:00' },
+      lock: ['2026-07-20T00:00:00+08:00', '2026-10-20T23:59:59+08:00'],
+      action: ['2026-07-20T00:00:00+08:00', '2026-10-12T00:00:00+08:00'],
+      withdrawable: '2026-10-20T23:59:59+08:00',
+      terms: [['2026-07-15T16:00:00+08:00', 0.14, 0, 0.14]],
+    },
+    {
+      id: 'apc-s2', deposit: { start: '2026-10-13T00:00:00+08:00', end: '2026-10-27T09:00:00+08:00' },
+      lock: ['2026-10-20T15:00:00+08:00', '2027-01-21T15:00:00+08:00'],
+      action: ['2026-10-13T00:00:00+08:00', '2027-01-13T00:00:00+08:00'],
+      withdrawable: '2027-01-21T15:00:00+08:00',
+      terms: [['2026-10-13T00:00:00+08:00', 0.13, 0, 0.13], ['2026-10-20T15:00:00+08:00', 0.138, 0.1, 0.125]],
+    },
+  ]);
+  assert.deepEqual(view('pALPHA'), [
+    {
+      id: 'palpha-p2', deposit: null,
+      lock: ['2026-07-20T19:00:00+08:00', '2026-10-20T19:00:00+08:00'],
+      action: ['2026-09-17T11:00:00+08:00', '2026-10-01T00:00:00+08:00'],
+      withdrawable: '2026-10-20T19:00:00+08:00',
+      terms: [['2026-07-20T19:00:00+08:00', 0.14, 0, 0.14]],
+    },
+    {
+      id: 'palpha-p3', deposit: { start: '2026-10-20T15:00:00+08:00', end: '2026-10-27T09:00:00+08:00' },
+      lock: ['2026-10-20T15:00:00+08:00', '2027-01-21T15:00:00+08:00'],
+      action: ['2026-12-18T11:00:00+08:00', '2027-01-01T11:00:00+08:00'],
+      withdrawable: '2027-01-21T15:00:00+08:00',
+      terms: [['2026-10-20T15:00:00+08:00', 0.138, 0, 0.138], ['2026-10-27T09:00:00+08:00', 0.138, 0.1, 0.125]],
+    },
+  ]);
 });
 
-test('pALPHA registry matches pAlpha phase 3 windows', () => {
-  const pa = DEFAULT_REGISTRY.find((v) => v.id === 'pALPHA');
-  assert.deepEqual(pa.actionPeriodConfig, {
-    lockStart: '2026-10-20T15:00:00+08:00',
-    lockEnd: '2027-01-21T15:00:00+08:00',
-    actionStart: '2026-12-18T11:00:00+08:00',
-    actionEnd: '2027-01-01T11:00:00+08:00',
-    withdrawable: '2027-01-21',
-  });
+test('registry epoch times all carry an explicit +08:00 timestamp', () => {
+  for (const v of DEFAULT_REGISTRY) {
+    for (const e of v.epochs ?? []) {
+      const times = [e.lockStart, e.lockEnd, e.actionStart, e.actionEnd, e.withdrawable,
+        ...(e.deposit ? [e.deposit.start, e.deposit.end] : []), ...e.terms.map((t) => t.from)];
+      for (const t of times) assert.match(t, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/, `${e.id}: ${t}`);
+    }
+  }
+});
+
+test('remote config cannot override epochs', () => {
+  const merged = mergeRegistry(DEFAULT_REGISTRY, { version: 1, vaults: [{ id: 'APC3M', epochs: [], apyFallback: 0.2 }] });
+  const apc = merged.find((v) => v.id === 'APC3M');
+  assert.equal(apc.epochs.length, 2);
+  assert.equal(apc.apyFallback, 0.2);
 });

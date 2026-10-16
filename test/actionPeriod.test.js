@@ -1,24 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveActionPeriod, resolveRedeemableActionPeriod, resolveR25TrancheActionPeriod } from '../src/logic/actionPeriod.ts';
+import { resolveRedeemableActionPeriod, resolveR25TrancheActionPeriod } from '../src/logic/actionPeriod.ts';
+import { resolveActionPeriod } from '../src/logic/epochs.ts';
 
+const epoch = (o) => ({ id: 'e', label: 'E', terms: [], ...o });
 const apc = {
-  id: 'APC3M',
-  actionPeriodConfig: {
+  id: 'APC3M', apyFallback: 0.14,
+  epochs: [epoch({
     lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-20T23:59:59+08:00',
     actionStart: '2026-07-20T00:00:00+08:00', actionEnd: '2026-10-16T00:00:00+08:00',
-    withdrawable: '2026-10-20',
-  },
+    withdrawable: '2026-10-20T23:59:59+08:00',
+  })],
 };
-// pALPHA uses config for action period, same as APC3M (the vault-info API is
-// no longer used at all).
+// pALPHA uses config for action period, same as APC3M.
 const pa = {
-  id: 'pALPHA',
-  actionPeriodConfig: {
-    lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-01T00:00:00+08:00',
+  id: 'pALPHA', apyFallback: 0.14,
+  epochs: [epoch({
+    lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-01T11:00:00+08:00',
     actionStart: '2026-09-17T11:00:00+08:00', actionEnd: '2026-10-01T00:00:00+08:00',
-    withdrawable: '2026-10-01',
-  },
+    withdrawable: '2026-10-01T11:00:00+08:00',
+  })],
 };
 
 test('APC3M uses config (open within window)', () => {
@@ -47,7 +48,7 @@ test('pALPHA open during its configured window', () => {
 });
 
 test('unavailable when config unparseable', () => {
-  const broken = { id: 'APC3M', actionPeriodConfig: { actionStart: 'nope', actionEnd: 'nope', withdrawable: 'nope', lockStart: 'x', lockEnd: 'x' } };
+  const broken = { id: 'APC3M', apyFallback: 0.14, epochs: [epoch({ actionStart: 'nope', actionEnd: 'nope', withdrawable: 'nope', lockStart: 'x', lockEnd: 'x' })] };
   const ap = resolveActionPeriod(broken, 1000);
   assert.equal(ap.source, 'unavailable');
   assert.equal(ap.startTs, null);

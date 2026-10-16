@@ -1,5 +1,6 @@
-import type { ActionPeriod, DepositPeriod, Position, R25HoldingInfo, VaultRegistryEntry } from '../types.ts';
+import type { ActionPeriod, Position, R25HoldingInfo, VaultRegistryEntry } from '../types.ts';
 import { isoToSec, dayDiff } from '../util/time.ts';
+import { currentEpoch, epochApy, resolveEpochs } from './epochs.ts';
 
 const SECONDS_PER_YEAR = 31557600; // 365.25d
 
@@ -13,50 +14,15 @@ export function lockTiming(entry: VaultRegistryEntry, now: number): {
   /** Years left until lock end (0 once the lock has ended). */
   remainingLockYears: number | null;
 } {
-  const lockStartSec = isoToSec(entry.actionPeriodConfig?.lockStart ?? '');
-  const lockEndSec = isoToSec(entry.actionPeriodConfig?.lockEnd ?? '');
+  // Lock timing follows the current epoch (the one existing holdings are in).
+  const cur = currentEpoch(entry, now);
+  const lockStartSec = isoToSec(cur?.lockStart ?? '');
+  const lockEndSec = isoToSec(cur?.lockEnd ?? '');
   return {
     depositedDurationDays: lockStartSec != null && now >= lockStartSec ? dayDiff(lockStartSec, now) : null,
     lockYears: lockStartSec != null && lockEndSec != null ? (lockEndSec - lockStartSec) / SECONDS_PER_YEAR : null,
     remainingLockYears: lockEndSec != null ? Math.max(0, lockEndSec - now) / SECONDS_PER_YEAR : null,
   };
-}
-
-/**
- * Deposit window state from depositPeriodConfig; null if absent. The window is
- * Pre + Extend; the segments differ only in APY / performance fee.
- */
-export function resolveDepositPeriod(entry: VaultRegistryEntry, now: number): DepositPeriod | null {
-  const cfg = entry.depositPeriodConfig;
-  if (!cfg) return null;
-  const preStart = isoToSec(cfg.preStart);
-  const preEnd = isoToSec(cfg.preEnd);
-  const extendEnd = isoToSec(cfg.extendEnd);
-  if (preStart == null || preEnd == null || extendEnd == null) return null;
-  const phase = now < preStart ? 'upcoming' : now < preEnd ? 'pre' : now < extendEnd ? 'extend' : 'closed';
-  return {
-    start: cfg.preStart,
-    end: cfg.extendEnd,
-    isOpen: phase === 'pre' || phase === 'extend',
-    phase,
-    segments: [
-      { phase: 'pre', start: cfg.preStart, end: cfg.preEnd, ...cfg.pre },
-      { phase: 'extend', start: cfg.preEnd, end: cfg.extendEnd, ...cfg.extend },
-    ],
-  };
-}
-
-/**
- * Registry APY for a vault at `now`: the current deposit segment's net APY
- * when depositPeriodConfig exists (Pre terms until preEnd, Extend terms after —
- * they also cover the rest of the lock), else apyFallback.
- */
-export function configApy(entry: VaultRegistryEntry, now: number): number {
-  const cfg = entry.depositPeriodConfig;
-  if (!cfg) return entry.apyFallback;
-  const preEnd = isoToSec(cfg.preEnd);
-  if (preEnd == null) return entry.apyFallback;
-  return now < preEnd ? cfg.pre.netApy : cfg.extend.netApy;
 }
 
 export function computePosition(args: {
@@ -89,7 +55,7 @@ export function computePosition(args: {
   // NAV keeps compounding across epochs while entryNavBaseline stays at the
   // epoch-entry price, so earned yield can already exceed one epoch's worth.
   // With no NAV we cannot know what has been earned; project off principal.
-  const effectiveApy = apy ?? configApy(entry, now);
+  const effectiveApy = apy ?? epochApy(entry, now);
   const projectionBase = currentValue ?? principal;
   const expectedTotalYield = remainingLockYears != null
     ? (realizedYield ?? 0) + projectionBase * effectiveApy * remainingLockYears
@@ -116,12 +82,11 @@ export function computePosition(args: {
     principal,
     realizedYield,
     depositedDurationDays,
-    lockEnd: entry.actionPeriodConfig?.lockEnd ?? null,
+    lockEnd: currentEpoch(entry, now)?.lockEnd ?? null,
     expectedTotalYield,
     actionPeriod,
   };
-  const depositPeriod = resolveDepositPeriod(entry, now);
-  if (depositPeriod) position.depositPeriod = depositPeriod;
+  if (entry.epochs) position.epochs = resolveEpochs(entry, now).epochs;
   if (r25Holding) position.r25 = r25Holding;
   return position;
 }

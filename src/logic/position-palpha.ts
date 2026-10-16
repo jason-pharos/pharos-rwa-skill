@@ -1,6 +1,7 @@
 import type { ActionPeriod, Position, VaultRegistryEntry } from '../types.ts';
 import type { PositionValue } from '../sources/ember.ts';
 import { lockTiming } from './position.ts';
+import { currentEpoch, epochApy, resolveEpochs } from './epochs.ts';
 
 /** API money fields are integer strings scaled by 1e9 ("USD e9"). */
 function usdE9(raw: string | undefined): number | null {
@@ -55,7 +56,7 @@ export function computePAlphaPosition(args: {
   const principal = currentValue != null && totalYield != null ? currentValue - totalYield : null;
 
   const { depositedDurationDays, remainingLockYears } = lockTiming(entry, now);
-  const effectiveApy = apy ?? entry.apyFallback;
+  const effectiveApy = apy ?? epochApy(entry, now);
   const expectedTotalYield = totalYield != null && currentValue != null && remainingLockYears != null
     ? totalYield + currentValue * effectiveApy * remainingLockYears
     : null;
@@ -78,11 +79,12 @@ export function computePAlphaPosition(args: {
     principal,
     realizedYield: totalYield,
     depositedDurationDays,
-    lockEnd: entry.actionPeriodConfig?.lockEnd ?? null,
+    lockEnd: currentEpoch(entry, now)?.lockEnd ?? null,
     expectedTotalYield,
     actionPeriod,
   };
 
+  if (entry.epochs) position.epochs = resolveEpochs(entry, now).epochs;
   if (realized != null && unrealized != null && totalYield != null) {
     position.yieldBreakdown = { realized, unrealized, total: totalYield };
   }
