@@ -98,35 +98,38 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     },
     entryNavBaseline: 1.0,
     apyFallback: 0.14,
-    // Operating periods (UTC+8). P2 = previous skill config (deposit window
-    // unknown); P3 = omni-port-fe PALPHA_PHASE3_WINDOW / PALPHA_PHASE3_APY
-    // (performance fee waived while deposits are open). The action period is the
+    // Operating periods (UTC+8), synchronized from the omni-port-fe prod
+    // configuration. P2 uses the confirmed Season 2 schedule; P3 follows
+    // commit b26cd0d's corrected window. The action period is the
     // withdraw-REQUEST window inside the lock — not the lock end.
     epochs: [
       {
         id: 'palpha-p2',
         label: 'Phase 2',
-        lockStart: '2026-07-20T19:00:00+08:00',
-        lockEnd: '2026-10-20T19:00:00+08:00',
-        actionStart: '2026-09-17T11:00:00+08:00',
+        // Confirmed pALPHA Season 2 prod schedule.
+        deposit: { start: '2026-04-13T19:00:00+08:00', end: '2026-04-20T07:59:00+08:00' },
+        lockStart: '2026-04-20T08:00:00+08:00',
+        lockEnd: '2026-07-20T19:00:00+08:00',
+        actionStart: '2026-09-15T00:00:00+08:00',
         actionEnd: '2026-10-01T00:00:00+08:00',
         withdrawable: '2026-10-20T19:00:00+08:00',
         terms: [
-          { from: '2026-07-20T19:00:00+08:00', label: 'Phase 2', grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 },
+          { from: '2026-04-13T19:00:00+08:00', label: 'Phase 2', grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 },
         ],
       },
       {
         id: 'palpha-p3',
         label: 'Phase 3',
-        deposit: { start: '2026-10-20T15:00:00+08:00', end: '2026-10-27T09:00:00+08:00' },
-        lockStart: '2026-10-20T15:00:00+08:00',
-        lockEnd: '2027-01-21T15:00:00+08:00',
+        // Matches omni-port-fe commit b26cd0d's corrected pAlpha window.
+        deposit: { start: '2026-10-20T19:00:00+08:00', end: '2026-10-27T19:00:00+08:00' },
+        lockStart: '2026-10-20T19:00:00+08:00',
+        lockEnd: '2027-01-21T19:00:00+08:00',
         actionStart: '2026-12-18T11:00:00+08:00',
         actionEnd: '2027-01-01T11:00:00+08:00',
-        withdrawable: '2027-01-21T15:00:00+08:00',
+        withdrawable: '2027-01-21T19:00:00+08:00',
         terms: [
-          { from: '2026-10-20T15:00:00+08:00', label: 'Deposit Period', grossApy: 0.138, performanceFeeRate: 0, netApy: 0.138 },
-          { from: '2026-10-27T09:00:00+08:00', label: 'Lock Period', grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
+          { from: '2026-10-20T19:00:00+08:00', label: 'Deposit Period', grossApy: 0.138, performanceFeeRate: 0, netApy: 0.138 },
+          { from: '2026-10-27T19:00:00+08:00', label: 'Lock Period', grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
         ],
       },
     ],

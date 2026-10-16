@@ -7,6 +7,8 @@ description: "Inspect and manage a client's Pharos RWA vault holdings (APC3M, pA
 
 A zero-dependency CLI that inspects Pharos RWA vault positions and market data, plus host MCP tools that drive deposits and withdrawals on the client's connected wallet. The CLI output is a single JSON object on stdout; translate its fields into natural language in the client's language (Chinese or English). Host MCP tool results come back as structured data and are reported the same way. Errors are single-line JSON on stderr with a non-zero exit code (CLI) or a `status`/`isError` field (MCP tools).
 
+**Vault timing source:** epoch and action-period dates must always follow the current `prod` configuration of `pharos-omni-port-fe`; never copy timing from the `test` configuration. When prod windows change, refresh the registry and bundled CLI together.
+
 ## Capability
 
 **Read (CLI) — arbitrary address, comprehensive:**
