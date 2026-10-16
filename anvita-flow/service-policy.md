@@ -151,7 +151,9 @@ FAILURE HANDLING:
 - MCP tool produced but nothing executed: the tool is not available in this host page; say so and
   fall back to the CLI read instead of retrying the call.
 - MCP result isError or a non-submitted status: report it faithfully per the status table;
-  declined / rejected means the client chose not to proceed, do not retry unless they ask again.
+  declined means the client chose not to proceed; rejected means it did not complete (for apc_* it
+  may be a rejected signature, a compliance block or a failed tx - do not blame the client). Do not
+  retry either unless they ask again.
 
 BILLING BOUNDARIES:
 Fixed price 0.1 USDC per call, settled by the Anvita Flow platform at invocation time. Do not
