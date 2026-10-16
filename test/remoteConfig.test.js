@@ -88,3 +88,14 @@ test('APC3M registry matches APC Season 2 windows; depositPeriodConfig overridab
   assert.equal(m.depositPeriodConfig.extend.netApy, 0.12);
   assert.equal(m.depositPeriodConfig.extend.performanceFeeRate, 0.1); // nested terms deep-merged
 });
+
+test('pALPHA registry matches pAlpha phase 3 windows', () => {
+  const pa = DEFAULT_REGISTRY.find((v) => v.id === 'pALPHA');
+  assert.deepEqual(pa.actionPeriodConfig, {
+    lockStart: '2026-10-20T15:00:00+08:00',
+    lockEnd: '2027-01-21T15:00:00+08:00',
+    actionStart: '2026-12-18T11:00:00+08:00',
+    actionEnd: '2027-01-01T11:00:00+08:00',
+    withdrawable: '2027-01-21',
+  });
+});

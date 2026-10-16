@@ -19,6 +19,16 @@
       },
       "apyFallback": 0.14,
       "entryNavBaseline": 1.0
+    },
+    {
+      "id": "pALPHA",
+      "actionPeriodConfig": {
+        "lockStart": "2026-10-20T15:00:00+08:00",
+        "lockEnd": "2027-01-21T15:00:00+08:00",
+        "actionStart": "2026-12-18T11:00:00+08:00",
+        "actionEnd": "2027-01-01T11:00:00+08:00",
+        "withdrawable": "2027-01-21"
+      }
     }
   ]
 }

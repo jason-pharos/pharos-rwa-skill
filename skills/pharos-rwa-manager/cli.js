@@ -20973,17 +20973,16 @@ var DEFAULT_REGISTRY = [
     },
     entryNavBaseline: 1,
     apyFallback: 0.14,
-    // Lock runs one epoch (3 months) from the previous epoch's settlement:
-    // the vault-info API's last epoch ended 2026-07-20T11:00Z and the app's
-    // withdrawable timestamp for this epoch is 1792494000 = 2026-10-20T11:00Z
-    // (= 19:00+08). The action period (09-17 → 10-01) is the withdraw-REQUEST
+    // pAlpha phase 3 (matches omni-port-fe PALPHA_PHASE3_WINDOW): deposit
+    // 10-20 15:00 → 10-27 09:00, lock 10-20 15:00 → 2027-01-21 15:00. The
+    // action period (12-18 11:00 → 2027-01-01 11:00) is the withdraw-REQUEST
     // window inside the lock — it is NOT the lock end or the withdrawable date.
     actionPeriodConfig: {
-      lockStart: "2026-07-20T19:00:00+08:00",
-      lockEnd: "2026-10-20T19:00:00+08:00",
-      actionStart: "2026-09-17T11:00:00+08:00",
-      actionEnd: "2026-10-01T00:00:00+08:00",
-      withdrawable: "2026-10-20"
+      lockStart: "2026-10-20T15:00:00+08:00",
+      lockEnd: "2027-01-21T15:00:00+08:00",
+      actionStart: "2026-12-18T11:00:00+08:00",
+      actionEnd: "2027-01-01T11:00:00+08:00",
+      withdrawable: "2027-01-21"
     }
   },
   {
