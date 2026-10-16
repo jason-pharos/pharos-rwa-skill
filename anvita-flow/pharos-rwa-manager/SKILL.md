@@ -46,7 +46,7 @@ The host MCP tools take **no address**: they always act on the wallet currently 
 3. **Gather missing input** —
    - The client's own assets (no address typed): call `wallet_get_address` first and use its `address`. If `connected: false`, ask the client to connect their wallet in the host page. **Never** use the agent's own payment/billing wallet address — it is not the client's wallet.
    - CLI path: if `position`/`reminders`/`advise` and no address is known, use the address from `wallet_get_address`, or ask once for the client's Pharos address (`0x…`) when they gave none and no wallet is connected. Validate `0x` + 40 hex before running. `vaults` needs no address.
-   - MCP path: no address to gather. For deposit/withdraw, confirm the **unit and amount** with the client first (USDC for APC/pAlpha deposit, shares for APC/pAlpha withdraw) — units differ and getting them wrong moves the wrong quantity.
+   - MCP path: no address to gather. For deposit/withdraw, confirm the **unit and amount** with the client first (USDC for APC/pAlpha deposit, shares for APC/pAlpha withdraw) — units differ and getting them wrong moves the wrong quantity. For a cross-chain `apc_deposit` (`ethereum` / `bsc`), check the amount is ≥ 2 USDC before emitting the call; if not, stop and offer the options in "Hard safety rules".
 4. **Confirm the deliverable** — restate in one line what you'll do (e.g. "your APC3M + pALPHA + VRPC positions and yield, in Chinese", or "redeem 0.001 APC3M shares from the connected wallet"). No need to loop on confirmations beyond the address/amount.
 5. **Execute** —
    - CLI path: run the CLI (see Execution Instructions), allow ≥ 30 seconds before treating it as hung. One command per address.
@@ -67,7 +67,7 @@ This skill can drive deposits and withdrawals through the **host page's MCP tool
 | `wallet_get_address` | `{}` | the connected wallet's address — use to look up "my" assets |
 | `apc_get_position` | `{}` | connected wallet's APC3M/USDC position |
 | `apc_get_vault_overview` | `{}` | APC vault public overview |
-| `apc_deposit` | `{"amount":"<USDC>","sourceChain":"pharos"}` | deposit USDC into APC (receives APC3M on Pharos). `sourceChain` is `pharos` (default), `ethereum`, or `bsc` (cross-chain, ≥ 2 USDC, bridge fee applies). `bsc` = **BNB Chain** (formerly Binance Smart Chain) |
+| `apc_deposit` | `{"amount":"<USDC>","sourceChain":"pharos"}` | deposit USDC into APC (receives APC3M on Pharos). `sourceChain` is `pharos` (default), `ethereum`, or `bsc` (cross-chain, ≥ 2 USDC — check before calling, bridge fee applies). `bsc` = **BNB Chain** (formerly Binance Smart Chain) |
 | `apc_get_deposit_order` | `{"txHash":"<source-chain tx>"}` or `{}` | status of a cross-chain APC deposit (or the latest few) |
 | `apc_withdraw` | `{"amount":"<APC3M shares>"}` | redeem APC3M shares to USDC |
 | `palpha_deposit` | `{"amount":"<USDC>"}` | deposit USDC into pAlpha (receives pALPHA) |
@@ -124,6 +124,7 @@ For any status not in this table, quote the status and `message` verbatim; never
 - Never describe `submitted` as on-chain confirmation, and never auto-retry a write operation.
 - `apc_deposit`/`apc_withdraw` are for APC only; `palpha_deposit`/`palpha_withdraw` are for pAlpha only. Never map a client's APC request to a pAlpha tool or vice versa. If the client does not name the vault for a deposit/withdraw, ask which one (APC or pAlpha) — never pick one yourself.
 - `apc_deposit` source chain: use `pharos` unless the client explicitly says the USDC is on Ethereum or BNB Chain. **BNB Chain, BNB, BSC, BNB Smart Chain and Binance Smart Chain (币安链 / BNB 链) are all the same chain** → pass `"sourceChain":"bsc"`; when talking to the client, call it "BNB Chain" (the result's `sourceChainName`). Never switch to a cross-chain route on your own (e.g. because the Pharos balance is short) — ask first. For a cross-chain deposit, tell the client before emitting the call that the minimum is 2 USDC, a bridge fee applies, and APC3M arrives on Pharos only after the bridge completes.
+- **Cross-chain minimum — check before calling.** If `sourceChain` is `ethereum` or `bsc` and `amount` < 2 USDC, do **NOT** emit the `apc_deposit` call — the host rejects it anyway, and the round trip is slow. Reply right away that cross-chain deposits require at least 2 USDC (a bridge fee applies), and offer two options: deposit ≥ 2 USDC cross-chain, or deposit from Pharos (no cross-chain minimum) if they have USDC on Pharos. Never silently raise the amount or switch chains — wait for the client to choose. If `amount` is not a valid positive number, ask for it instead of calling. 2 USDC is only the host floor (`CROSS_CHAIN_MIN_DEPOSIT`); the bridge quote may still return `failed` with a higher `recommendAmount` — handle that per the status table.
 
 ## Execution Instructions
 
