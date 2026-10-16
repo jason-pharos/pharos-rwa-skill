@@ -12,7 +12,9 @@ export function buildActionPeriod(startTs: number | null, endTs: number | null, 
     start: secToIso(startTs),
     end: secToIso(endTs),
     startTs, endTs,
-    withdrawableDate: withdrawableTs !== null ? secToIso(withdrawableTs).slice(0, 10) : null,
+    // Calendar date in UTC+8 (the vaults' business timezone), not UTC: a
+    // 03:00 UTC+8 maturity is still the previous day in UTC.
+    withdrawableDate: withdrawableTs !== null ? new Date((withdrawableTs + 8 * 3600) * 1000).toISOString().slice(0, 10) : null,
     source,
     isOpen: st.isOpen,
     opensInDays: st.opensInDays,

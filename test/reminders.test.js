@@ -90,12 +90,17 @@ test('epoch-based position: one reminder per live epoch', () => {
   assert.match(r[1].message, /^pALPHA Phase 3: withdraw window opens in 59 day\(s\)\. Deposit open until Oct 27, 09:00 UTC\+8 \(Deposit Period net APY 13\.8%\)\.$/);
 });
 
-test('current epoch uses the position action period (R25 first), next uses its own', () => {
-  const current = view({ id: 'apc-s1', label: 'Season 1', role: 'current', status: 'locked', deposit: null, actionPeriod: apCfg({ stale: true }) });
-  const p = { ...mk('APC3M', apCfg({ source: 'r25-api', isOpen: true, closesInDays: 20 })), epochs: [current] };
-  const [rem] = buildReminders([p]);
-  assert.equal(rem.urgency, 'open');
-  assert.equal(rem.actionPeriod.source, 'r25-api');
+test('each epoch reminder uses that epoch\'s own action period (R25 attached to its epoch)', () => {
+  const r25 = apCfg({ source: 'r25-api', isOpen: true, closesInDays: 89 });
+  const s1 = view({ id: 'apc-s1', label: 'Season 1', role: 'current', status: 'locked', deposit: null, withdrawable: '2026-10-20T23:59:59+08:00', actionPeriod: apCfg({ stale: true }) });
+  const s2 = view({ id: 'apc-s2', label: 'Season 2', role: 'next', deposit: null, actionPeriod: r25 });
+  const p = { ...mk('APC3M', s1.actionPeriod), epochs: [s1, s2] };
+  const [r1, r2] = buildReminders([p]);
+  assert.equal(r1.urgency, 'closed');
+  assert.match(r1.message, /^APC3M Season 1: withdraw window for this epoch has closed; holdings roll over into the next epoch after Oct 20, 23:59 UTC\+8\.$/);
+  assert.equal(r2.urgency, 'open');
+  assert.equal(r2.actionPeriod, r25);
+  assert.equal(r2.message, 'APC3M Season 2: withdraw window is open now.');
 });
 
 test('deposit suffix omitted without terms', () => {
@@ -110,5 +115,15 @@ test('epoch-based position with no live epoch → single unknown reminder', () =
   assert.equal(r.length, 1);
   assert.equal(r[0].urgency, 'unknown');
   assert.equal(r[0].message, 'APC3M: no active epoch configured; config may be stale.');
+  assert.equal(r[0].epoch, undefined);
+});
+
+test('epoch-based position with no live epoch but an R25 action period → normal reminder', () => {
+  const p = { ...mk('APC3M', apCfg({ source: 'r25-api', isOpen: true, closesInDays: 30 })), epochs: [] };
+  const r = buildReminders([p]);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].urgency, 'open');
+  assert.equal(r[0].message, 'APC3M: withdraw window is open now.');
+  assert.equal(r[0].actionPeriod.source, 'r25-api');
   assert.equal(r[0].epoch, undefined);
 });

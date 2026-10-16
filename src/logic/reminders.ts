@@ -83,15 +83,18 @@ function fmtUtc8(iso: string): string {
 }
 
 /**
- * One reminder per live epoch. The current epoch keeps the position's action
- * period (R25 first for APC3M); later epochs use their own config dates.
+ * One reminder per live epoch, each from that epoch's own action period (the
+ * R25 window is already attached to the epoch it belongs to; see
+ * attachR25Period). No live epoch: the position's action period when it has
+ * one (e.g. R25 answered), else an unknown reminder.
  */
 function epochReminders(p: Position, epochs: EpochView[]): Reminder[] {
   if (epochs.length === 0) {
+    if (p.actionPeriod.source !== 'unavailable') return [singleReminder(p)];
     return [{ vault: p.vault, urgency: 'unknown', message: `${p.vault}: no active epoch configured; config may be stale.`, actionPeriod: p.actionPeriod }];
   }
   return epochs.map((e) => {
-    const ap = e.role === 'current' ? p.actionPeriod : e.actionPeriod;
+    const ap = e.actionPeriod;
     const urgency = classify(ap);
     const who = `${p.vault} ${e.label}`;
     let message = urgency === 'closed'
@@ -104,10 +107,14 @@ function epochReminders(p: Position, epochs: EpochView[]): Reminder[] {
   });
 }
 
+function singleReminder(p: Position): Reminder {
+  const urgency = classify(p.actionPeriod);
+  return { vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod, p.r25?.tranches), actionPeriod: p.actionPeriod };
+}
+
 export function buildReminders(positions: Position[]): Reminder[] {
   return positions.flatMap((p) => {
     if (p.epochs) return epochReminders(p, p.epochs);
-    const urgency = classify(p.actionPeriod);
-    return [{ vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod, p.r25?.tranches), actionPeriod: p.actionPeriod }];
+    return [singleReminder(p)];
   });
 }

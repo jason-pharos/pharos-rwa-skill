@@ -101,3 +101,39 @@ export function epochApy(entry: VaultRegistryEntry, now: number): number {
 export function resolveActionPeriod(entry: VaultRegistryEntry, now: number): ActionPeriod {
   return currentEpoch(entry, now)?.actionPeriod ?? buildActionPeriod(null, null, null, 'unavailable', now);
 }
+
+/** R25 nextMaturityDate may differ from the configured `withdrawable` by hours. */
+const R25_MATCH_TOLERANCE_SEC = 86400;
+
+/**
+ * Attach the R25 /vault/period window (APC3M) to the live epoch it describes:
+ * the epoch whose `withdrawable` is within 1 day of R25 `nextMaturityDate`.
+ * During a season overlap R25 already reports the NEXT season, so pinning it to
+ * the current epoch would show S2's window against S1's holdings.
+ *
+ * Returns the epoch views (the matched one carries the R25 object; inputs are
+ * not mutated) and the top-level action period — always the current epoch's,
+ * so `epochs[0].actionPeriod === actionPeriod`. No live epoch → R25 when
+ * available (nothing to match against, but better than nothing), else
+ * unavailable.
+ */
+export function attachR25Period(
+  views: EpochView[],
+  r25: ActionPeriod | null,
+  maturitySec: number | null,
+  now: number,
+): { epochs: EpochView[]; actionPeriod: ActionPeriod } {
+  if (views.length === 0) {
+    return { epochs: [], actionPeriod: r25 ?? buildActionPeriod(null, null, null, 'unavailable', now) };
+  }
+  let match = -1;
+  if (r25 != null && maturitySec != null) {
+    let best = Infinity;
+    views.forEach((v, i) => {
+      const diff = Math.abs(isoToSec(v.withdrawable)! - maturitySec);
+      if (diff <= R25_MATCH_TOLERANCE_SEC && diff < best) { best = diff; match = i; }
+    });
+  }
+  const epochs = match < 0 ? views : views.map((v, i) => (i === match ? { ...v, actionPeriod: r25! } : v));
+  return { epochs, actionPeriod: epochs[0]!.actionPeriod };
+}

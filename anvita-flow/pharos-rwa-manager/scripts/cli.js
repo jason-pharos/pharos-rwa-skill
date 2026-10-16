@@ -38799,7 +38799,9 @@ function buildActionPeriod(startTs, endTs, withdrawableTs, source, now) {
     end: secToIso(endTs),
     startTs,
     endTs,
-    withdrawableDate: withdrawableTs !== null ? secToIso(withdrawableTs).slice(0, 10) : null,
+    // Calendar date in UTC+8 (the vaults' business timezone), not UTC: a
+    // 03:00 UTC+8 maturity is still the previous day in UTC.
+    withdrawableDate: withdrawableTs !== null ? new Date((withdrawableTs + 8 * 3600) * 1e3).toISOString().slice(0, 10) : null,
     source,
     isOpen: st.isOpen,
     opensInDays: st.opensInDays,
@@ -38943,6 +38945,25 @@ function epochApy(entry, now) {
 }
 function resolveActionPeriod(entry, now) {
   return currentEpoch(entry, now)?.actionPeriod ?? buildActionPeriod(null, null, null, "unavailable", now);
+}
+var R25_MATCH_TOLERANCE_SEC = 86400;
+function attachR25Period(views, r25, maturitySec, now) {
+  if (views.length === 0) {
+    return { epochs: [], actionPeriod: r25 ?? buildActionPeriod(null, null, null, "unavailable", now) };
+  }
+  let match = -1;
+  if (r25 != null && maturitySec != null) {
+    let best = Infinity;
+    views.forEach((v, i) => {
+      const diff = Math.abs(isoToSec(v.withdrawable) - maturitySec);
+      if (diff <= R25_MATCH_TOLERANCE_SEC && diff < best) {
+        best = diff;
+        match = i;
+      }
+    });
+  }
+  const epochs = match < 0 ? views : views.map((v, i) => i === match ? { ...v, actionPeriod: r25 } : v);
+  return { epochs, actionPeriod: epochs[0].actionPeriod };
 }
 
 // src/logic/position.ts
@@ -39132,10 +39153,11 @@ function fmtUtc8(iso) {
 }
 function epochReminders(p, epochs) {
   if (epochs.length === 0) {
+    if (p.actionPeriod.source !== "unavailable") return [singleReminder(p)];
     return [{ vault: p.vault, urgency: "unknown", message: `${p.vault}: no active epoch configured; config may be stale.`, actionPeriod: p.actionPeriod }];
   }
   return epochs.map((e) => {
-    const ap = e.role === "current" ? p.actionPeriod : e.actionPeriod;
+    const ap = e.actionPeriod;
     const urgency = classify(ap);
     const who = `${p.vault} ${e.label}`;
     let message = urgency === "closed" ? `${who}: withdraw window for this epoch has closed; holdings roll over into the next epoch after ${fmtUtc8(e.withdrawable)}.` : messageFor(who, urgency, ap, p.r25?.tranches);
@@ -39145,11 +39167,14 @@ function epochReminders(p, epochs) {
     return { vault: p.vault, epoch: e.id, urgency, message, actionPeriod: ap };
   });
 }
+function singleReminder(p) {
+  const urgency = classify(p.actionPeriod);
+  return { vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod, p.r25?.tranches), actionPeriod: p.actionPeriod };
+}
 function buildReminders(positions) {
   return positions.flatMap((p) => {
     if (p.epochs) return epochReminders(p, p.epochs);
-    const urgency = classify(p.actionPeriod);
-    return [{ vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod, p.r25?.tranches), actionPeriod: p.actionPeriod }];
+    return [singleReminder(p)];
   });
 }
 
@@ -39543,11 +39568,22 @@ async function buildPositions(address, opts, errors, depsOverride) {
         navResolvedFrom = result.navResolvedFrom;
       }
       let actionPeriod;
+      let epochViews;
       if (useR25ActionPeriod) {
         const totalShares = r25h ? Number(r25h.shares) : Number(shares.totalHuman);
         actionPeriod = resolveR25TrancheActionPeriod(r25Positions.get(entry.r25VaultId), totalShares, nav, entry.redeemability.lockDays, entry.redeemability.async, now);
       } else if (rawRedeem != null) {
         actionPeriod = resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability.lockDays, entry.redeemability.async);
+      } else if (entry.epochs) {
+        const period = entry.r25VaultId ? r25Periods?.get(entry.r25VaultId) : void 0;
+        const attached = attachR25Period(
+          resolveEpochs(entry, now).epochs,
+          period ? resolveR25ActionPeriod(period, now) : null,
+          period?.nextMaturityDate != null ? Math.floor(period.nextMaturityDate / 1e3) : null,
+          now
+        );
+        actionPeriod = attached.actionPeriod;
+        epochViews = attached.epochs;
       } else if (entry.r25VaultId && r25Periods?.has(entry.r25VaultId)) {
         actionPeriod = resolveR25ActionPeriod(r25Periods.get(entry.r25VaultId), now);
       } else {
@@ -39562,20 +39598,19 @@ async function buildPositions(address, opts, errors, depsOverride) {
       }
       const common = { entry, sharesHuman: effectiveShares, nav, apy, actionPeriod, now, navResolvedFrom };
       if (emberPosition) {
-        const position = computePAlphaPosition({ ...common, emberPosition });
+        const position2 = computePAlphaPosition({ ...common, emberPosition });
+        if (epochViews) position2.epochs = epochViews;
         if (sharesUnknown) {
-          position.shares = null;
-          position.assumptions.sharesResolvedFrom = "unavailable";
+          position2.shares = null;
+          position2.assumptions.sharesResolvedFrom = "unavailable";
         }
-        positions.push(position);
+        positions.push(position2);
         return;
       }
-      if (r25h) {
-        const posData = entry.r25VaultId ? r25Positions?.get(entry.r25VaultId) : void 0;
-        positions.push(computePosition({ ...common, r25Holding: toR25HoldingInfo(r25h, posData) }));
-      } else {
-        positions.push(computePosition(common));
-      }
+      const posData = r25h && entry.r25VaultId ? r25Positions?.get(entry.r25VaultId) : void 0;
+      const position = r25h ? computePosition({ ...common, r25Holding: toR25HoldingInfo(r25h, posData) }) : computePosition(common);
+      if (epochViews) position.epochs = epochViews;
+      positions.push(position);
     } catch (e) {
       errors.push({ scope: entry.id, error: String(e.message ?? e) });
     }

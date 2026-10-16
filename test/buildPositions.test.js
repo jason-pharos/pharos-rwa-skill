@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPositions } from '../src/index.ts';
+import { buildReminders } from '../src/logic/reminders.ts';
 
 /**
  * These tests cover the R25-integration regression: the R25 pre-fetch used to
@@ -184,4 +185,97 @@ test('a misconfigured epoch is reported but the position is still built', async 
   assert.ok(pa, 'pALPHA position still present');
   assert.deepEqual(pa.epochs.map((e) => e.id), ['palpha-p2']);
   assert.ok(errors.some((e) => e.scope === 'epochs:bad'), JSON.stringify(errors));
+});
+
+// --- R25 /vault/period ↔ epoch matching (APC S1/S2 overlap) -----------------
+// Same two seasons as the registry. On 2026-10-16 both are live: S1 holds the
+// existing shares (its window closed 10-12), S2 is taking deposits.
+const APC_TWO = {
+  ...APC3M,
+  epochs: [
+    {
+      id: 'apc-s1', label: 'Season 1',
+      deposit: { start: '2026-07-15T16:00:00+08:00', end: '2026-07-19T23:59:00+08:00' },
+      lockStart: '2026-07-20T00:00:00+08:00', lockEnd: '2026-10-20T23:59:59+08:00',
+      actionStart: '2026-07-20T00:00:00+08:00', actionEnd: '2026-10-12T00:00:00+08:00',
+      withdrawable: '2026-10-20T23:59:59+08:00',
+      terms: [{ from: '2026-07-15T16:00:00+08:00', label: 'Season 1', grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 }],
+    },
+    {
+      id: 'apc-s2', label: 'Season 2',
+      deposit: { start: '2026-10-13T00:00:00+08:00', end: '2026-10-27T09:00:00+08:00' },
+      lockStart: '2026-10-20T15:00:00+08:00', lockEnd: '2027-01-21T15:00:00+08:00',
+      actionStart: '2026-10-13T00:00:00+08:00', actionEnd: '2027-01-13T00:00:00+08:00',
+      withdrawable: '2027-01-21T15:00:00+08:00',
+      terms: [
+        { from: '2026-10-13T00:00:00+08:00', label: 'Deposit Period (Pre)', grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
+        { from: '2026-10-20T15:00:00+08:00', label: 'Deposit Period (Extend) & Lock', grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
+      ],
+    },
+  ],
+};
+const NOW_OVERLAP = Math.floor(Date.parse('2026-10-16T12:00:00+08:00') / 1000);
+const r25Period = (o) => ({
+  preDepositWindowStart: null, preDepositWindowEnd: null, lockStart: null,
+  nextMaturityDate: null, withdrawalWindowStart: null, withdrawalWindowEnd: null, ...o,
+});
+const S2_PERIOD = r25Period({
+  withdrawalWindowStart: Date.parse('2026-10-13T00:00:00+08:00'),
+  withdrawalWindowEnd: Date.parse('2027-01-13T00:00:00+08:00'),
+  nextMaturityDate: Date.parse('2027-01-21T15:00:00+08:00'),
+});
+
+async function apcWithPeriod(period) {
+  const errors = [];
+  const deps = okDeps({ registry: [APC_TWO], fetchR25VaultPeriod: async () => period });
+  const positions = await buildPositions(ADDR, { noRemote: true, now: NOW_OVERLAP }, errors, deps);
+  const apc = positions.find((p) => p.vault === 'APC3M');
+  assert.ok(apc, `APC3M position present (errors: ${JSON.stringify(errors)})`);
+  return apc;
+}
+
+test('R25 window for the NEXT epoch (S2) attaches to S2, not to the current S1', async () => {
+  const apc = await apcWithPeriod(S2_PERIOD);
+  assert.equal(apc.actionPeriod.source, 'config');
+  assert.equal(apc.actionPeriod.stale, true, 'S1 window (to 10-12) has passed');
+  assert.deepEqual(apc.epochs.map((e) => e.id), ['apc-s1', 'apc-s2']);
+  assert.equal(apc.epochs[0].actionPeriod, apc.actionPeriod);
+  assert.equal(apc.epochs[1].actionPeriod.source, 'r25-api');
+  assert.equal(apc.lockEnd, '2026-10-20T23:59:59+08:00');
+
+  const rems = buildReminders([apc]);
+  const s1 = rems.find((r) => r.epoch === 'apc-s1');
+  const s2 = rems.find((r) => r.epoch === 'apc-s2');
+  assert.equal(s1.urgency, 'closed');
+  assert.match(s1.message, /^APC3M Season 1: withdraw window for this epoch has closed; holdings roll over into the next epoch after Oct 20, 23:59 UTC\+8\./);
+  assert.equal(s2.urgency, 'open');
+  assert.equal(s2.actionPeriod.source, 'r25-api');
+});
+
+test('R25 window for the CURRENT epoch (S1) is the top-level action period', async () => {
+  const apc = await apcWithPeriod(r25Period({
+    withdrawalWindowStart: Date.parse('2026-07-20T00:00:00+08:00'),
+    withdrawalWindowEnd: Date.parse('2026-10-12T00:00:00+08:00'),
+    nextMaturityDate: Date.parse('2026-10-20T23:59:59+08:00'),
+  }));
+  assert.equal(apc.actionPeriod.source, 'r25-api');
+  assert.equal(apc.epochs[0].actionPeriod.source, 'r25-api');
+  assert.equal(apc.epochs[0].actionPeriod, apc.actionPeriod);
+  assert.equal(apc.epochs[1].actionPeriod.source, 'config');
+});
+
+test('R25 window matching no live epoch → config everywhere', async () => {
+  const apc = await apcWithPeriod({ ...S2_PERIOD, nextMaturityDate: Date.parse('2027-06-01T00:00:00+08:00') });
+  assert.equal(apc.actionPeriod.source, 'config');
+  assert.deepEqual(apc.epochs.map((e) => e.actionPeriod.source), ['config', 'config']);
+  assert.equal(apc.epochs[0].actionPeriod, apc.actionPeriod);
+});
+
+test('no live epoch but R25 answered → top-level action period is R25', async () => {
+  const errors = [];
+  const now = Math.floor(Date.parse('2027-02-01T00:00:00+08:00') / 1000);
+  const deps = okDeps({ registry: [APC_TWO], fetchR25VaultPeriod: async () => S2_PERIOD });
+  const [apc] = await buildPositions(ADDR, { noRemote: true, now }, errors, deps);
+  assert.deepEqual(apc.epochs, []);
+  assert.equal(apc.actionPeriod.source, 'r25-api');
 });

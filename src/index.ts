@@ -1,11 +1,11 @@
-import type { AdviceBundle, Envelope, Position, R25HoldingInfo, UpdateInfo, VaultMarket, VaultRegistryEntry } from './types.ts';
+import type { AdviceBundle, Envelope, EpochView, Position, R25HoldingInfo, UpdateInfo, VaultMarket, VaultRegistryEntry } from './types.ts';
 import { loadRegistry } from './config/remoteConfig.ts';
 import { fetchHarbor } from './sources/harbor.ts';
 import { fetchR25VaultList, fetchR25Holdings, fetchR25VaultPeriod, fetchR25Positions, fetchR25Activity, type R25HoldingItem, type R25VaultPeriod, type R25Positions, type R25ActivityItem } from './sources/r25.ts';
 import { DEFAULT_RPC, DEFAULT_CHAIN_ID, makeProvider, getVaultShares, getVaultNavOnchain, getRedeemability, type RawRedeemability } from './sources/chain.ts';
 import { resolveRedeemableActionPeriod, resolveR25ActionPeriod, resolveR25TrancheActionPeriod } from './logic/actionPeriod.ts';
 import { computePosition } from './logic/position.ts';
-import { epochApy, resolveActionPeriod, resolveEpochs } from './logic/epochs.ts';
+import { attachR25Period, epochApy, resolveActionPeriod, resolveEpochs } from './logic/epochs.ts';
 import { computePAlphaPosition } from './logic/position-palpha.ts';
 import { fetchEmberPositionValue } from './sources/ember.ts';
 import { buildReminders, type Reminder } from './logic/reminders.ts';
@@ -422,14 +422,28 @@ export async function buildPositions(
       }
 
       // Action period: R25 positions/tranche data for ERC-7540 async vaults
-      // (all non-expired shares requestable); else on-chain redeemability; else
-      // R25 period API for WINDOWED vaults (APC3M); else config dates.
+      // (all non-expired shares requestable); else on-chain redeemability; else,
+      // for epoch vaults, the current epoch's dates — with the R25 period API
+      // window (APC3M) attached to whichever live epoch it describes; else
+      // config dates.
       let actionPeriod;
+      // Set for epoch vaults so Position.epochs carries the R25 attachment.
+      let epochViews: EpochView[] | undefined;
       if (useR25ActionPeriod) {
         const totalShares = r25h ? Number(r25h.shares) : Number(shares.totalHuman);
         actionPeriod = resolveR25TrancheActionPeriod(r25Positions!.get(entry.r25VaultId!)!, totalShares, nav, entry.redeemability!.lockDays, entry.redeemability!.async, now);
       } else if (rawRedeem != null) {
         actionPeriod = resolveRedeemableActionPeriod(rawRedeem, Number(shares.totalHuman), nav, entry.redeemability!.lockDays, entry.redeemability!.async);
+      } else if (entry.epochs) {
+        const period = entry.r25VaultId ? r25Periods?.get(entry.r25VaultId) : undefined;
+        const attached = attachR25Period(
+          resolveEpochs(entry, now).epochs,
+          period ? resolveR25ActionPeriod(period, now) : null,
+          period?.nextMaturityDate != null ? Math.floor(period.nextMaturityDate / 1000) : null,
+          now,
+        );
+        actionPeriod = attached.actionPeriod;
+        epochViews = attached.epochs;
       } else if (entry.r25VaultId && r25Periods?.has(entry.r25VaultId)) {
         actionPeriod = resolveR25ActionPeriod(r25Periods.get(entry.r25VaultId)!, now);
       } else {
@@ -456,6 +470,7 @@ export async function buildPositions(
       // failure was already recorded above and degrades to the on-chain path.
       if (emberPosition) {
         const position = computePAlphaPosition({ ...common, emberPosition });
+        if (epochViews) position.epochs = epochViews;
         if (sharesUnknown) {
           // The value is Ember's, but the wallet balance is not known — say so
           // rather than reporting the 0 that failed reads sum to.
@@ -467,12 +482,12 @@ export async function buildPositions(
       }
 
       // R25 vaults with API data get real earnings (not estimated).
-      if (r25h) {
-        const posData = entry.r25VaultId ? r25Positions?.get(entry.r25VaultId) : undefined;
-        positions.push(computePosition({ ...common, r25Holding: toR25HoldingInfo(r25h, posData) }));
-      } else {
-        positions.push(computePosition(common));
-      }
+      const posData = r25h && entry.r25VaultId ? r25Positions?.get(entry.r25VaultId) : undefined;
+      const position = r25h
+        ? computePosition({ ...common, r25Holding: toR25HoldingInfo(r25h, posData) })
+        : computePosition(common);
+      if (epochViews) position.epochs = epochViews;
+      positions.push(position);
     } catch (e) {
       errors.push({ scope: entry.id, error: String((e as Error).message ?? e) });
     }

@@ -114,11 +114,11 @@ interface EpochView {
 ### position
 
 - **新增 `epochs: EpochView[]`**：仅对配置了 `epochs` 的 vault 输出。
-- **原有字段语义不变**：顶层的 `actionPeriod`、`lockEnd`、`depositedDurationDays`、`expectedTotalYield` 改为由 `current` 期计算，即原来的 `actionPeriodConfig` 换成 `current` 期。APC3M 的 `actionPeriod` 仍然优先用 R25 `/vault/period`，接口不可用时回退到 `current` 期。
+- **原有字段语义不变**：顶层的 `actionPeriod`、`lockEnd`、`depositedDurationDays`、`expectedTotalYield` 改为由 `current` 期计算，即原来的 `actionPeriodConfig` 换成 `current` 期。APC3M 的 R25 `/vault/period` 窗口按到期日归属到对应的期：R25 `nextMaturityDate` 与某个有效期的 `withdrawable` 相差不超过 1 天，就把 R25 窗口作为该期的 `actionPeriod`（重叠期间 R25 往往已经返回下一期的窗口）。匹配到 `current` 期时顶层 `actionPeriod` 用 R25；匹配到 `next` 期或都匹配不上（含 R25 没有 `nextMaturityDate`、接口不可用）时顶层用 `current` 期的配置日期。因此顶层 `actionPeriod` 始终与 `epochs[current].actionPeriod` 一致。没有有效期但 R25 有数据时，顶层 `actionPeriod` 用 R25（无从匹配，但好过没有）。
 - **删除 `depositPeriod`**：上一个 commit 新增的这个字段，已被 `epochs` 取代。
 - **APY 回退值**：R25 没有返回 APY 时，使用 `current.currentTerms.netApy`；没有档位时才用 `entry.apyFallback`。由 `epochApy(entry, now)` 实现，取代 `configApy`。
 - **`errors`**：`resolveEpochs` 产生的错误并入 position 的 `errors` 输出。
-- **没有有效期时**（所有期都过了 withdrawable）：`epochs: []`，顶层 `actionPeriod.source = 'unavailable'`，`lockEnd`、`expectedTotalYield` 为 `null`。
+- **没有有效期时**（所有期都过了 withdrawable）：`epochs: []`，顶层 `actionPeriod.source = 'unavailable'`（APC3M 的 R25 有数据时为 `r25-api`），`lockEnd`、`expectedTotalYield` 为 `null`。
 
 ### reminders
 
@@ -126,7 +126,7 @@ interface EpochView {
   - 紧急程度沿用现有的 `classify` 规则，按该期的 `actionPeriod` 计算。
   - 存入期开放时，消息末尾追加 `Deposit open until <date> (<label> net APY x%).`。
 - **没有有效期时**：输出一条 `unknown` 提醒：`<vault>: no active epoch configured; config may be stale.`
-- **日期来源**：`current` 期的提醒沿用顶层 `actionPeriod`（APC3M 优先用 R25，和现有行为一致）；`next` 期的提醒用该期的配置日期。
+- **日期来源**：每一期的提醒都用该期自己的 `actionPeriod`。APC3M 的 R25 窗口只挂在 `withdrawable` 与 R25 `nextMaturityDate` 相差不超过 1 天的那一期上，其余期用配置日期（规则见上文 position 部分）。没有有效期时，如果顶层 `actionPeriod` 可用（R25 有数据），照常出一条普通提醒；否则出 `unknown` 提醒。
 - **上一期的赎回窗口已过**：紧急程度仍为 `closed`，但消息改为 `<vault> <label>: withdraw window for this epoch has closed; holdings roll over into the next epoch after <withdrawable>.`，不再沿用"config may be stale"的提示。
 - **VRPC**：不变。
 
@@ -140,7 +140,7 @@ interface EpochView {
 | 情况 | 处理 |
 |---|---|
 | 某一期时间解析失败或起止顺序颠倒 | 跳过这一期，`errors` 记一条 `epochs:<id>` |
-| 没有有效期 | `epochs: []`，`actionPeriod` 为 unavailable，提醒为 `unknown`（配置可能已过期） |
+| 没有有效期 | `epochs: []`，`actionPeriod` 为 unavailable，提醒为 `unknown`（配置可能已过期）；APC3M 的 R25 有数据时 `actionPeriod` 用 R25，出普通提醒 |
 | `now` 早于第一档 | `currentTerms` 取第一档 |
 | 没有配置档位 | `currentTerms: null`，APY 回退到 `apyFallback` |
 

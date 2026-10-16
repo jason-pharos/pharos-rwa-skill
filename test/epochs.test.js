@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveEpochs, currentEpoch, epochApy, resolveActionPeriod } from '../src/logic/epochs.ts';
+import { resolveEpochs, currentEpoch, epochApy, resolveActionPeriod, attachR25Period } from '../src/logic/epochs.ts';
+import { buildActionPeriod } from '../src/logic/actionPeriod.ts';
 
 const sec = (iso) => Math.floor(Date.parse(iso) / 1000);
 
@@ -153,4 +154,47 @@ test('currentEpoch / epochApy / resolveActionPeriod follow the current epoch', (
   // action period
   assert.equal(resolveActionPeriod(APC, sec('2026-10-21T00:00:00+08:00')).end, '2027-01-12T16:00:00.000Z');
   assert.equal(resolveActionPeriod(APC, sec('2027-02-01T00:00:00+08:00')).source, 'unavailable');
+});
+
+// attachR25Period: the R25 /vault/period window belongs to the live epoch whose
+// `withdrawable` matches R25 nextMaturityDate within 1 day.
+const NOW_OVERLAP = sec('2026-10-16T12:00:00+08:00');
+const r25ap = (startIso, endIso, maturityIso) =>
+  buildActionPeriod(sec(startIso), sec(endIso), maturityIso ? sec(maturityIso) : null, 'r25-api', NOW_OVERLAP);
+
+test('attachR25Period: R25 matches the next epoch → top-level stays current config', () => {
+  const views = resolveEpochs(APC, NOW_OVERLAP).epochs;
+  const r25 = r25ap('2026-10-13T00:00:00+08:00', '2027-01-13T00:00:00+08:00', '2027-01-21T15:00:00+08:00');
+  const out = attachR25Period(views, r25, sec('2027-01-21T15:00:00+08:00'), NOW_OVERLAP);
+  assert.equal(out.actionPeriod.source, 'config');
+  assert.equal(out.actionPeriod, out.epochs[0].actionPeriod);
+  assert.equal(out.epochs[1].actionPeriod, r25);
+  assert.equal(views[1].actionPeriod.source, 'config', 'input views are not mutated');
+});
+
+test('attachR25Period: R25 matches the current epoch (within 1 day) → R25 everywhere for it', () => {
+  const views = resolveEpochs(APC, NOW_OVERLAP).epochs;
+  const r25 = r25ap('2026-07-20T00:00:00+08:00', '2026-10-12T00:00:00+08:00', '2026-10-21T15:00:00+08:00');
+  const out = attachR25Period(views, r25, sec('2026-10-21T15:00:00+08:00'), NOW_OVERLAP); // 15h off
+  assert.equal(out.actionPeriod, r25);
+  assert.equal(out.epochs[0].actionPeriod, r25);
+  assert.equal(out.epochs[1].actionPeriod.source, 'config');
+});
+
+test('attachR25Period: no match / no maturity / no R25 → config everywhere', () => {
+  const views = resolveEpochs(APC, NOW_OVERLAP).epochs;
+  const r25 = r25ap('2026-10-13T00:00:00+08:00', '2027-01-13T00:00:00+08:00', null);
+  for (const [ap, mat] of [[r25, sec('2026-10-22T00:00:01+08:00')], [r25, sec('2027-03-01T00:00:00+08:00')], [r25, null], [null, null]]) {
+    const out = attachR25Period(views, ap, mat, NOW_OVERLAP);
+    assert.deepEqual(out.epochs.map((e) => e.actionPeriod.source), ['config', 'config']);
+    assert.equal(out.actionPeriod, out.epochs[0].actionPeriod);
+  }
+});
+
+test('attachR25Period: no live epoch → R25 if available, else unavailable', () => {
+  const r25 = r25ap('2026-10-13T00:00:00+08:00', '2027-01-13T00:00:00+08:00', '2027-01-21T15:00:00+08:00');
+  const withR25 = attachR25Period([], r25, sec('2027-01-21T15:00:00+08:00'), NOW_OVERLAP);
+  assert.deepEqual(withR25.epochs, []);
+  assert.equal(withR25.actionPeriod, r25);
+  assert.equal(attachR25Period([], null, null, NOW_OVERLAP).actionPeriod.source, 'unavailable');
 });

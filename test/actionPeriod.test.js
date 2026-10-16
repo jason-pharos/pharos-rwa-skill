@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRedeemableActionPeriod, resolveR25TrancheActionPeriod } from '../src/logic/actionPeriod.ts';
+import { buildActionPeriod, resolveRedeemableActionPeriod, resolveR25TrancheActionPeriod } from '../src/logic/actionPeriod.ts';
 import { resolveActionPeriod } from '../src/logic/epochs.ts';
 
 const epoch = (o) => ({ id: 'e', label: 'E', terms: [], ...o });
@@ -196,4 +196,10 @@ test('r25-tranche: empty available → no shares requestable', () => {
   assert.equal(ap.redeemable.maxRedeemShares, 0);
   assert.equal(ap.isOpen, false);
   assert.equal(ap.redeemable.fullyRedeemable, false);
+});
+
+test('withdrawableDate is the UTC+8 calendar date, not the UTC one', () => {
+  const sec = (iso) => Math.floor(Date.parse(iso) / 1000);
+  const ap = buildActionPeriod(sec('2026-10-13T00:00:00+08:00'), sec('2027-01-13T00:00:00+08:00'), sec('2026-11-01T03:00:00+08:00'), 'config', sec('2026-10-16T00:00:00+08:00'));
+  assert.equal(ap.withdrawableDate, '2026-11-01');
 });
