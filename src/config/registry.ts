@@ -24,12 +24,25 @@ export const DEFAULT_REGISTRY: VaultRegistryEntry[] = [
     entryNavBaseline: 1.0,
     apyFallback: 0.14,
     r25VaultId: 'APC3M',
+    // APC Season 2 (matches omni-port-fe getApcSeason2Window defaults).
+    // Lock starts when Deposit Period (Pre) ends; Extend deposits overlap the lock.
     actionPeriodConfig: {
-      lockStart: '2026-07-20T00:00:00+08:00',
-      lockEnd: '2026-10-20T23:59:59+08:00',
-      actionStart: '2026-07-20T00:00:00+08:00',
-      actionEnd: '2026-10-16T00:00:00+08:00',
-      withdrawable: '2026-10-20',
+      lockStart: '2026-10-20T15:00:00+08:00',
+      lockEnd: '2027-01-21T15:00:00+08:00',
+      actionStart: '2026-10-13T00:00:00+08:00',
+      actionEnd: '2027-01-13T00:00:00+08:00',
+      withdrawable: '2027-01-21',
+    },
+    // Deposit Period = Pre + Extend; split only for the different APY / fee:
+    // Pre 13% (≈0% deposit APY + ≈13% USDC rewards), no performance fee;
+    // Extend (and the rest of the lock) 13.8% gross (13% deposit + 0.8% rewards),
+    // 10% performance fee on the deposit APY → 12.5% net.
+    depositPeriodConfig: {
+      preStart: '2026-10-13T00:00:00+08:00',
+      preEnd: '2026-10-20T15:00:00+08:00',
+      extendEnd: '2026-10-27T09:00:00+08:00',
+      pre: { grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
+      extend: { grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
     },
   },
   {

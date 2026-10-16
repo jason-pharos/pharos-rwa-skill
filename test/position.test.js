@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computePosition } from '../src/logic/position.ts';
+import { computePosition, configApy, resolveDepositPeriod } from '../src/logic/position.ts';
 
 const entry = {
   id: 'APC3M', entryNavBaseline: 1.0, apyFallback: 0.14,
@@ -62,4 +62,37 @@ test('computePosition navResolvedFrom defaults to onchain', () => {
   const now = Math.floor(Date.parse('2026-07-27T00:00:00+08:00') / 1000);
   const p = computePosition({ entry, sharesHuman: '100', nav: 1.03, apy: 0.14, actionPeriod: ap, now });
   assert.equal(p.assumptions.navResolvedFrom, 'onchain');
+});
+
+test('resolveDepositPeriod: one window (Pre + Extend), phase per segment', () => {
+  const e = { apyFallback: 0.14, depositPeriodConfig: {
+    preStart: '2026-10-13T00:00:00+08:00', preEnd: '2026-10-20T15:00:00+08:00', extendEnd: '2026-10-27T09:00:00+08:00',
+    pre: { grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
+    extend: { grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
+  } };
+  const at = (iso) => resolveDepositPeriod(e, Math.floor(Date.parse(iso) / 1000));
+  assert.equal(at('2026-10-12T00:00:00+08:00').phase, 'upcoming');
+  assert.equal(at('2026-10-12T00:00:00+08:00').isOpen, false);
+  assert.equal(at('2026-10-16T00:00:00+08:00').phase, 'pre');
+  assert.equal(at('2026-10-20T15:00:00+08:00').phase, 'extend');
+  assert.equal(at('2026-10-20T15:00:00+08:00').isOpen, true);
+  assert.equal(at('2026-10-27T09:00:00+08:00').phase, 'closed');
+  const dp = at('2026-10-16T00:00:00+08:00');
+  assert.equal(dp.start, '2026-10-13T00:00:00+08:00');
+  assert.equal(dp.end, '2026-10-27T09:00:00+08:00');
+  assert.deepEqual(dp.segments.map((s) => [s.phase, s.netApy, s.performanceFeeRate]), [['pre', 0.13, 0], ['extend', 0.125, 0.1]]);
+  assert.equal(resolveDepositPeriod({}, 0), null);
+});
+
+test('configApy: Pre net APY before preEnd, Extend net APY after (rest of lock too)', () => {
+  const e = { apyFallback: 0.14, depositPeriodConfig: {
+    preStart: '2026-10-13T00:00:00+08:00', preEnd: '2026-10-20T15:00:00+08:00', extendEnd: '2026-10-27T09:00:00+08:00',
+    pre: { grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
+    extend: { grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 },
+  } };
+  const sec = (iso) => Math.floor(Date.parse(iso) / 1000);
+  assert.equal(configApy(e, sec('2026-10-16T00:00:00+08:00')), 0.13);
+  assert.equal(configApy(e, sec('2026-10-22T00:00:00+08:00')), 0.125);
+  assert.equal(configApy(e, sec('2026-12-01T00:00:00+08:00')), 0.125);
+  assert.equal(configApy({ apyFallback: 0.14 }, 0), 0.14);
 });

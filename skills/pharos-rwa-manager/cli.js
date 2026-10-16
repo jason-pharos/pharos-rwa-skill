@@ -20913,12 +20913,25 @@ var DEFAULT_REGISTRY = [
     entryNavBaseline: 1,
     apyFallback: 0.14,
     r25VaultId: "APC3M",
+    // APC Season 2 (matches omni-port-fe getApcSeason2Window defaults).
+    // Lock starts when Deposit Period (Pre) ends; Extend deposits overlap the lock.
     actionPeriodConfig: {
-      lockStart: "2026-07-20T00:00:00+08:00",
-      lockEnd: "2026-10-20T23:59:59+08:00",
-      actionStart: "2026-07-20T00:00:00+08:00",
-      actionEnd: "2026-10-16T00:00:00+08:00",
-      withdrawable: "2026-10-20"
+      lockStart: "2026-10-20T15:00:00+08:00",
+      lockEnd: "2027-01-21T15:00:00+08:00",
+      actionStart: "2026-10-13T00:00:00+08:00",
+      actionEnd: "2027-01-13T00:00:00+08:00",
+      withdrawable: "2027-01-21"
+    },
+    // Deposit Period = Pre + Extend; split only for the different APY / fee:
+    // Pre 13% (≈0% deposit APY + ≈13% USDC rewards), no performance fee;
+    // Extend (and the rest of the lock) 13.8% gross (13% deposit + 0.8% rewards),
+    // 10% performance fee on the deposit APY → 12.5% net.
+    depositPeriodConfig: {
+      preStart: "2026-10-13T00:00:00+08:00",
+      preEnd: "2026-10-20T15:00:00+08:00",
+      extendEnd: "2026-10-27T09:00:00+08:00",
+      pre: { grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
+      extend: { grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 }
     }
   },
   {
@@ -21133,6 +21146,16 @@ function mergeRegistry(base, override) {
     };
     if (entry.actionPeriodConfig) {
       merged.actionPeriodConfig = { ...entry.actionPeriodConfig, ...patch.actionPeriodConfig ?? {} };
+    }
+    if (entry.depositPeriodConfig) {
+      const base2 = entry.depositPeriodConfig;
+      const p = patch.depositPeriodConfig ?? {};
+      merged.depositPeriodConfig = {
+        ...base2,
+        ...p,
+        pre: { ...base2.pre, ...p.pre ?? {} },
+        extend: { ...base2.extend, ...p.extend ?? {} }
+      };
     }
     return merged;
   });
@@ -38844,6 +38867,32 @@ function lockTiming(entry, now) {
     remainingLockYears: lockEndSec != null ? Math.max(0, lockEndSec - now) / SECONDS_PER_YEAR : null
   };
 }
+function resolveDepositPeriod(entry, now) {
+  const cfg = entry.depositPeriodConfig;
+  if (!cfg) return null;
+  const preStart = isoToSec(cfg.preStart);
+  const preEnd = isoToSec(cfg.preEnd);
+  const extendEnd = isoToSec(cfg.extendEnd);
+  if (preStart == null || preEnd == null || extendEnd == null) return null;
+  const phase = now < preStart ? "upcoming" : now < preEnd ? "pre" : now < extendEnd ? "extend" : "closed";
+  return {
+    start: cfg.preStart,
+    end: cfg.extendEnd,
+    isOpen: phase === "pre" || phase === "extend",
+    phase,
+    segments: [
+      { phase: "pre", start: cfg.preStart, end: cfg.preEnd, ...cfg.pre },
+      { phase: "extend", start: cfg.preEnd, end: cfg.extendEnd, ...cfg.extend }
+    ]
+  };
+}
+function configApy(entry, now) {
+  const cfg = entry.depositPeriodConfig;
+  if (!cfg) return entry.apyFallback;
+  const preEnd = isoToSec(cfg.preEnd);
+  if (preEnd == null) return entry.apyFallback;
+  return now < preEnd ? cfg.pre.netApy : cfg.extend.netApy;
+}
 function computePosition(args) {
   const { entry, sharesHuman, nav, apy, actionPeriod, now, navResolvedFrom, r25Holding } = args;
   const shares = Number(sharesHuman);
@@ -38852,7 +38901,7 @@ function computePosition(args) {
   const realizedYield = hasRealEarnings ? r25Holding.earnings : currentValue != null ? currentValue - shares * entry.entryNavBaseline : null;
   const principal = hasRealEarnings ? currentValue - r25Holding.earnings : shares * entry.entryNavBaseline;
   const { depositedDurationDays, remainingLockYears } = lockTiming(entry, now);
-  const effectiveApy = apy ?? entry.apyFallback;
+  const effectiveApy = apy ?? configApy(entry, now);
   const projectionBase = currentValue ?? principal;
   const expectedTotalYield = remainingLockYears != null ? (realizedYield ?? 0) + projectionBase * effectiveApy * remainingLockYears : null;
   const assumptions = {
@@ -38879,6 +38928,8 @@ function computePosition(args) {
     expectedTotalYield,
     actionPeriod
   };
+  const depositPeriod = resolveDepositPeriod(entry, now);
+  if (depositPeriod) position.depositPeriod = depositPeriod;
   if (r25Holding) position.r25 = r25Holding;
   return position;
 }
@@ -39188,13 +39239,13 @@ async function runVaults(opts) {
   await enrichWithR25(vaults, opts);
   return makeEnvelope({ vaults }, errors, await safeUpdate(opts));
 }
-async function navFor(entry, provider, deps) {
+async function navFor(entry, provider, deps, now) {
   const { vault, shareDecimals, assetDecimals } = entry.onchainNav;
   try {
     const nav = await deps.getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
-    return { nav, apy: entry.apyFallback, navResolvedFrom: "onchain" };
+    return { nav, apy: configApy(entry, now), navResolvedFrom: "onchain" };
   } catch {
-    return { nav: null, apy: entry.apyFallback, navResolvedFrom: "none" };
+    return { nav: null, apy: configApy(entry, now), navResolvedFrom: "none" };
   }
 }
 function toR25HoldingInfo(h, positionsData, nowMs) {
@@ -39386,12 +39437,12 @@ async function buildPositions(address, opts, errors, depsOverride) {
       let navResolvedFrom;
       if (r25h) {
         nav = Number(r25h.nav) || null;
-        const baseApy = Number(r25h.apy) || entry.apyFallback;
+        const baseApy = Number(r25h.apy) || configApy(entry, now);
         const boostApy = r25h.boostInfo ? Number(r25h.boostInfo.boostApy) || 0 : 0;
         apy = baseApy + boostApy;
         navResolvedFrom = "r25-api";
       } else {
-        const result = await navFor(entry, provider, deps);
+        const result = await navFor(entry, provider, deps, now);
         nav = result.nav;
         apy = result.apy;
         navResolvedFrom = result.navResolvedFrom;

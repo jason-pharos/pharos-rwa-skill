@@ -1,4 +1,4 @@
-import type { VaultRegistryEntry } from '../types.ts';
+import type { DepositPhaseTerms, VaultRegistryEntry } from '../types.ts';
 import { DEFAULT_REGISTRY } from './registry.ts';
 import { fetchJson } from '../util/http.ts';
 import { readCache, writeCache } from '../util/cache.ts';
@@ -30,6 +30,20 @@ export function mergeRegistry(base: VaultRegistryEntry[], override: unknown): Va
     // deep-merge the configured dates only when the base entry has them.
     if (entry.actionPeriodConfig) {
       merged.actionPeriodConfig = { ...entry.actionPeriodConfig, ...(patch.actionPeriodConfig ?? {}) };
+    }
+    if (entry.depositPeriodConfig) {
+      const base = entry.depositPeriodConfig;
+      // Remote patch may carry only some dates / some terms of a segment.
+      const p = (patch.depositPeriodConfig ?? {}) as Partial<Omit<typeof base, 'pre' | 'extend'>> & {
+        pre?: Partial<DepositPhaseTerms>;
+        extend?: Partial<DepositPhaseTerms>;
+      };
+      merged.depositPeriodConfig = {
+        ...base,
+        ...p,
+        pre: { ...base.pre, ...(p.pre ?? {}) },
+        extend: { ...base.extend, ...(p.extend ?? {}) },
+      };
     }
     return merged;
   });

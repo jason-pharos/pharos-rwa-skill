@@ -70,3 +70,21 @@ test('registry: both VRPC vaults are redeemability-based with correct lockDays',
   assert.equal(wk.actionPeriodConfig, undefined); // no fixed dates
   assert.equal(wk.onchainNav.assetDecimals, 6);
 });
+
+test('APC3M registry matches APC Season 2 windows; depositPeriodConfig overridable', () => {
+  const apc = DEFAULT_REGISTRY.find((v) => v.id === 'APC3M');
+  assert.equal(apc.actionPeriodConfig.actionStart, '2026-10-13T00:00:00+08:00');
+  assert.equal(apc.actionPeriodConfig.actionEnd, '2027-01-13T00:00:00+08:00');
+  assert.equal(apc.actionPeriodConfig.lockStart, '2026-10-20T15:00:00+08:00');
+  assert.equal(apc.actionPeriodConfig.lockEnd, '2027-01-21T15:00:00+08:00');
+  assert.equal(apc.depositPeriodConfig.preEnd, '2026-10-20T15:00:00+08:00');
+  const merged = mergeRegistry(DEFAULT_REGISTRY, {
+    version: 1,
+    vaults: [{ id: 'APC3M', depositPeriodConfig: { extendEnd: '2026-10-28T09:00:00+08:00', extend: { netApy: 0.12 } } }],
+  });
+  const m = merged.find((v) => v.id === 'APC3M');
+  assert.equal(m.depositPeriodConfig.extendEnd, '2026-10-28T09:00:00+08:00');
+  assert.equal(m.depositPeriodConfig.preStart, '2026-10-13T00:00:00+08:00'); // untouched
+  assert.equal(m.depositPeriodConfig.extend.netApy, 0.12);
+  assert.equal(m.depositPeriodConfig.extend.performanceFeeRate, 0.1); // nested terms deep-merged
+});
