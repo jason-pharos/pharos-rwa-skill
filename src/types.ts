@@ -94,6 +94,58 @@ export interface VaultRegistryEntry {
     /** Also applies after the deposit window closes (rest of the lock). */
     extend: DepositPhaseTerms;
   };
+  /**
+   * Operating periods of a windowed vault (APC Season N, pALPHA Phase N).
+   * Every epoch not yet past `withdrawable` is reported; see logic/epochs.ts.
+   */
+  epochs?: Epoch[];
+}
+
+/** APY / fee tier of an epoch; active from `from` until the next tier's `from`. All decimals. */
+export interface EpochTerms {
+  from: string;                // ISO8601 with tz
+  label: string;               // e.g. 'Deposit Period (Pre)'
+  grossApy: number;            // e.g. 0.138
+  /** Share of the deposit APY (not rewards) taken as performance fee, e.g. 0.1. */
+  performanceFeeRate: number;
+  netApy: number;              // after performance fee, e.g. 0.125
+}
+
+/** One operating period of a windowed vault. All times ISO8601 with tz. */
+export interface Epoch {
+  id: string;                  // e.g. 'apc-s2'
+  label: string;               // e.g. 'Season 2'
+  /** Whole deposit window; omitted when unknown. */
+  deposit?: { start: string; end: string };
+  lockStart: string;
+  lockEnd: string;
+  actionStart: string;
+  actionEnd: string;
+  /** Full timestamp; the epoch drops out of the output once it has passed. */
+  withdrawable: string;
+  terms: EpochTerms[];
+}
+
+export type EpochRole = 'current' | 'next';
+export type EpochStatus = 'upcoming' | 'deposit-open' | 'locked';
+
+/** An epoch resolved against `now`. */
+export interface EpochView {
+  id: string;
+  label: string;
+  /** current = the epoch existing holdings are in; next = newer epochs. */
+  role: EpochRole;
+  status: EpochStatus;
+  deposit: { start: string; end: string; isOpen: boolean } | null;
+  lockStart: string;
+  lockEnd: string;
+  /** This epoch's own withdraw-request window (config dates). */
+  actionPeriod: ActionPeriod;
+  withdrawable: string;
+  /** Tier in effect now; the first tier before the epoch starts; null without tiers. */
+  currentTerms: EpochTerms | null;
+  /** All tiers, sorted by `from`. */
+  terms: EpochTerms[];
 }
 
 /** APY / fee terms of one deposit-period segment. All decimals. */

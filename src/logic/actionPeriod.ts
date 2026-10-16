@@ -3,7 +3,7 @@ import type { RawRedeemability } from '../sources/chain.ts';
 import type { R25VaultPeriod, R25Positions } from '../sources/r25.ts';
 import { isoToSec, secToIso, windowState } from '../util/time.ts';
 
-function build(startTs: number | null, endTs: number | null, withdrawableTs: number | null, source: ActionPeriod['source'], now: number): ActionPeriod {
+export function buildActionPeriod(startTs: number | null, endTs: number | null, withdrawableTs: number | null, source: ActionPeriod['source'], now: number): ActionPeriod {
   if (startTs === null || endTs === null) {
     return { start: null, end: null, startTs: null, endTs: null, withdrawableDate: null, source: 'unavailable', isOpen: false, opensInDays: null, closesInDays: null, stale: false };
   }
@@ -29,12 +29,12 @@ function build(startTs: number | null, endTs: number | null, withdrawableTs: num
  */
 export function resolveActionPeriod(entry: VaultRegistryEntry, now: number): ActionPeriod {
   const cfg = entry.actionPeriodConfig;
-  if (!cfg) return build(null, null, null, 'unavailable', now);
+  if (!cfg) return buildActionPeriod(null, null, null, 'unavailable', now);
   const startTs = isoToSec(cfg.actionStart);
   const endTs = isoToSec(cfg.actionEnd);
   const wTs = isoToSec(cfg.withdrawable);
-  if (startTs !== null && endTs !== null) return build(startTs, endTs, wTs, 'config', now);
-  return build(null, null, null, 'unavailable', now);
+  if (startTs !== null && endTs !== null) return buildActionPeriod(startTs, endTs, wTs, 'config', now);
+  return buildActionPeriod(null, null, null, 'unavailable', now);
 }
 
 /**
@@ -46,7 +46,7 @@ export function resolveR25ActionPeriod(period: R25VaultPeriod, now: number): Act
   const startTs = period.withdrawalWindowStart != null ? Math.floor(period.withdrawalWindowStart / 1000) : null;
   const endTs = period.withdrawalWindowEnd != null ? Math.floor(period.withdrawalWindowEnd / 1000) : null;
   const maturityTs = period.nextMaturityDate != null ? Math.floor(period.nextMaturityDate / 1000) : null;
-  return build(startTs, endTs, maturityTs, 'r25-api', now);
+  return buildActionPeriod(startTs, endTs, maturityTs, 'r25-api', now);
 }
 
 /**
