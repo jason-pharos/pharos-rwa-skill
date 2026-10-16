@@ -105,6 +105,7 @@ src/
     remoteConfig.ts   — Remote config overrides
   logic/
     actionPeriod.ts   — Action period resolution (config, on-chain, R25)
+    epochs.ts         — Epoch resolution (live epochs, current/next, APY tiers)
     position.ts       — Position computation
     position-palpha.ts— pALPHA-specific position logic
     reminders.ts      — Reminder builder
@@ -179,11 +180,17 @@ curl -sLO https://github.com/jason-pharos/pharos-rwa-skill/releases/latest/downl
 
 | Vault | Type | Action Period Source |
 |-------|------|---------------------|
-| APC3M | ERC-4626 sync, windowed | R25 `/vault/period` (dynamic dates) |
-| pALPHA | ERC-4626 sync | Config-based fixed dates |
+| APC3M | ERC-4626 sync, windowed | R25 `/vault/period` (current epoch), registry `epochs` fallback |
+| pALPHA | ERC-4626 sync | Registry `epochs` (config dates) |
 | VRPC-SemiYearly | ERC-7540 async | R25 positions API (all non-expired tranches) |
 | VRPC-Weekly | ERC-4626 sync | On-chain `maxRedeem` (accurate for sync) |
 
 VRPC-SemiYearly uses R25 positions data to override on-chain `maxRedeem` (which is misleading for ERC-7540 — only returns one settlement window). VRPC-Weekly stays on-chain because `maxRedeem` is accurate for sync vaults.
 
 VRPCW tranches are derived from `/portfolio/activity` deposit records (positions API returns "Unsupported vault").
+
+### Epochs (APC3M, pALPHA)
+
+Windowed vaults carry `epochs[]` in `src/config/registry.ts`: deposit window, lock, action period, `withdrawable` (full timestamp) and `terms` (APY / performance-fee tiers, each active from its `from`). `logic/epochs.ts` keeps every epoch with `now < withdrawable`, sorted by `lockStart`; the first is `current` (existing holdings, drives `actionPeriod` / `lockEnd` / APY fallback), the rest are `next`. Misconfigured epochs are skipped and reported as `epochs:<id>` errors.
+
+To launch a new season / phase: append an epoch to the vault's `epochs` (keep the previous one — it drops out by itself after its `withdrawable`), update tests, and release. Remote config cannot override epochs.

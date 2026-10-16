@@ -15128,7 +15128,7 @@ var require_axios = __commonJS({
         convertValue,
         isVisitable
       });
-      function build2(value, path) {
+      function build(value, path) {
         if (utils$1.isUndefined(value)) return;
         if (stack.indexOf(value) !== -1) {
           throw Error("Circular reference detected in " + path.join("."));
@@ -15143,7 +15143,7 @@ var require_axios = __commonJS({
             exposedHelpers
           );
           if (result === true) {
-            build2(el, path ? path.concat(key) : [key]);
+            build(el, path ? path.concat(key) : [key]);
           }
         });
         stack.pop();
@@ -15151,7 +15151,7 @@ var require_axios = __commonJS({
       if (!utils$1.isObject(obj)) {
         throw new TypeError("data must be an object");
       }
-      build2(obj);
+      build(obj);
       return formData;
     }
     function encode$1(str) {
@@ -20913,26 +20913,40 @@ var DEFAULT_REGISTRY = [
     entryNavBaseline: 1,
     apyFallback: 0.14,
     r25VaultId: "APC3M",
-    // APC Season 2 (matches omni-port-fe getApcSeason2Window defaults).
-    // Lock starts when Deposit Period (Pre) ends; Extend deposits overlap the lock.
-    actionPeriodConfig: {
-      lockStart: "2026-10-20T15:00:00+08:00",
-      lockEnd: "2027-01-21T15:00:00+08:00",
-      actionStart: "2026-10-13T00:00:00+08:00",
-      actionEnd: "2027-01-13T00:00:00+08:00",
-      withdrawable: "2027-01-21"
-    },
-    // Deposit Period = Pre + Extend; split only for the different APY / fee:
-    // Pre 13% (≈0% deposit APY + ≈13% USDC rewards), no performance fee;
-    // Extend (and the rest of the lock) 13.8% gross (13% deposit + 0.8% rewards),
-    // 10% performance fee on the deposit APY → 12.5% net.
-    depositPeriodConfig: {
-      preStart: "2026-10-13T00:00:00+08:00",
-      preEnd: "2026-10-20T15:00:00+08:00",
-      extendEnd: "2026-10-27T09:00:00+08:00",
-      pre: { grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
-      extend: { grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 }
-    }
+    // Operating periods (UTC+8) from omni-port-fe: S1 = apps/port/.env prod
+    // values, S2 = APC_SEASON2_DEFAULTS + SEASON2_APY. Every epoch not yet past
+    // `withdrawable` is reported (logic/epochs.ts). New season → append an epoch.
+    // S2 "Deposit Period (Pre)" / "(Extend)" are two APY/fee tiers of ONE
+    // deposit window, hence two `terms` entries rather than two windows.
+    epochs: [
+      {
+        id: "apc-s1",
+        label: "Season 1",
+        deposit: { start: "2026-07-15T16:00:00+08:00", end: "2026-07-19T23:59:00+08:00" },
+        lockStart: "2026-07-20T00:00:00+08:00",
+        lockEnd: "2026-10-20T23:59:59+08:00",
+        actionStart: "2026-07-20T00:00:00+08:00",
+        actionEnd: "2026-10-12T00:00:00+08:00",
+        withdrawable: "2026-10-20T23:59:59+08:00",
+        terms: [
+          { from: "2026-07-15T16:00:00+08:00", label: "Season 1", grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 }
+        ]
+      },
+      {
+        id: "apc-s2",
+        label: "Season 2",
+        deposit: { start: "2026-10-13T00:00:00+08:00", end: "2026-10-27T09:00:00+08:00" },
+        lockStart: "2026-10-20T15:00:00+08:00",
+        lockEnd: "2027-01-21T15:00:00+08:00",
+        actionStart: "2026-10-13T00:00:00+08:00",
+        actionEnd: "2027-01-13T00:00:00+08:00",
+        withdrawable: "2027-01-21T15:00:00+08:00",
+        terms: [
+          { from: "2026-10-13T00:00:00+08:00", label: "Deposit Period (Pre)", grossApy: 0.13, performanceFeeRate: 0, netApy: 0.13 },
+          { from: "2026-10-20T15:00:00+08:00", label: "Deposit Period (Extend) & Lock", grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 }
+        ]
+      }
+    ]
   },
   {
     id: "pALPHA",
@@ -20973,17 +20987,38 @@ var DEFAULT_REGISTRY = [
     },
     entryNavBaseline: 1,
     apyFallback: 0.14,
-    // pAlpha phase 3 (matches omni-port-fe PALPHA_PHASE3_WINDOW): deposit
-    // 10-20 15:00 → 10-27 09:00, lock 10-20 15:00 → 2027-01-21 15:00. The
-    // action period (12-18 11:00 → 2027-01-01 11:00) is the withdraw-REQUEST
-    // window inside the lock — it is NOT the lock end or the withdrawable date.
-    actionPeriodConfig: {
-      lockStart: "2026-10-20T15:00:00+08:00",
-      lockEnd: "2027-01-21T15:00:00+08:00",
-      actionStart: "2026-12-18T11:00:00+08:00",
-      actionEnd: "2027-01-01T11:00:00+08:00",
-      withdrawable: "2027-01-21"
-    }
+    // Operating periods (UTC+8). P2 = previous skill config (deposit window
+    // unknown); P3 = omni-port-fe PALPHA_PHASE3_WINDOW / PALPHA_PHASE3_APY
+    // (performance fee waived while deposits are open). The action period is the
+    // withdraw-REQUEST window inside the lock — not the lock end.
+    epochs: [
+      {
+        id: "palpha-p2",
+        label: "Phase 2",
+        lockStart: "2026-07-20T19:00:00+08:00",
+        lockEnd: "2026-10-20T19:00:00+08:00",
+        actionStart: "2026-09-17T11:00:00+08:00",
+        actionEnd: "2026-10-01T00:00:00+08:00",
+        withdrawable: "2026-10-20T19:00:00+08:00",
+        terms: [
+          { from: "2026-07-20T19:00:00+08:00", label: "Phase 2", grossApy: 0.14, performanceFeeRate: 0, netApy: 0.14 }
+        ]
+      },
+      {
+        id: "palpha-p3",
+        label: "Phase 3",
+        deposit: { start: "2026-10-20T15:00:00+08:00", end: "2026-10-27T09:00:00+08:00" },
+        lockStart: "2026-10-20T15:00:00+08:00",
+        lockEnd: "2027-01-21T15:00:00+08:00",
+        actionStart: "2026-12-18T11:00:00+08:00",
+        actionEnd: "2027-01-01T11:00:00+08:00",
+        withdrawable: "2027-01-21T15:00:00+08:00",
+        terms: [
+          { from: "2026-10-20T15:00:00+08:00", label: "Deposit Period", grossApy: 0.138, performanceFeeRate: 0, netApy: 0.138 },
+          { from: "2026-10-27T09:00:00+08:00", label: "Lock Period", grossApy: 0.138, performanceFeeRate: 0.1, netApy: 0.125 }
+        ]
+      }
+    ]
   },
   {
     id: "VRPC-SemiYearly",
@@ -21022,7 +21057,7 @@ var DEFAULT_REGISTRY = [
     entryNavBaseline: 1,
     apyFallback: 0.15,
     r25VaultId: "VRPCS"
-    // no actionPeriodConfig — see redeemability above.
+    // no epochs — see redeemability above.
   },
   {
     id: "VRPC-Weekly",
@@ -21058,7 +21093,7 @@ var DEFAULT_REGISTRY = [
     entryNavBaseline: 1,
     apyFallback: 0.08,
     r25VaultId: "VRPCW"
-    // no actionPeriodConfig — see redeemability above.
+    // no epochs — see redeemability above.
   }
 ];
 
@@ -21138,25 +21173,11 @@ function mergeRegistry(base, override) {
   return base.map((entry) => {
     const patch = o.vaults.find((v) => v && v.id === entry.id);
     if (!patch) return entry;
-    const merged = {
+    return {
       ...entry,
       apyFallback: patch.apyFallback ?? entry.apyFallback,
       entryNavBaseline: patch.entryNavBaseline ?? entry.entryNavBaseline
     };
-    if (entry.actionPeriodConfig) {
-      merged.actionPeriodConfig = { ...entry.actionPeriodConfig, ...patch.actionPeriodConfig ?? {} };
-    }
-    if (entry.depositPeriodConfig) {
-      const base2 = entry.depositPeriodConfig;
-      const p = patch.depositPeriodConfig ?? {};
-      merged.depositPeriodConfig = {
-        ...base2,
-        ...p,
-        pre: { ...base2.pre, ...p.pre ?? {} },
-        extend: { ...base2.extend, ...p.extend ?? {} }
-      };
-    }
-    return merged;
   });
 }
 function configUrl() {
@@ -38768,7 +38789,7 @@ function windowState(startSec, endSec, now) {
 }
 
 // src/logic/actionPeriod.ts
-function build(startTs, endTs, withdrawableTs, source, now) {
+function buildActionPeriod(startTs, endTs, withdrawableTs, source, now) {
   if (startTs === null || endTs === null) {
     return { start: null, end: null, startTs: null, endTs: null, withdrawableDate: null, source: "unavailable", isOpen: false, opensInDays: null, closesInDays: null, stale: false };
   }
@@ -38786,20 +38807,11 @@ function build(startTs, endTs, withdrawableTs, source, now) {
     stale: st.stale
   };
 }
-function resolveActionPeriod(entry, now) {
-  const cfg = entry.actionPeriodConfig;
-  if (!cfg) return build(null, null, null, "unavailable", now);
-  const startTs = isoToSec(cfg.actionStart);
-  const endTs = isoToSec(cfg.actionEnd);
-  const wTs = isoToSec(cfg.withdrawable);
-  if (startTs !== null && endTs !== null) return build(startTs, endTs, wTs, "config", now);
-  return build(null, null, null, "unavailable", now);
-}
 function resolveR25ActionPeriod(period, now) {
   const startTs = period.withdrawalWindowStart != null ? Math.floor(period.withdrawalWindowStart / 1e3) : null;
   const endTs = period.withdrawalWindowEnd != null ? Math.floor(period.withdrawalWindowEnd / 1e3) : null;
   const maturityTs = period.nextMaturityDate != null ? Math.floor(period.nextMaturityDate / 1e3) : null;
-  return build(startTs, endTs, maturityTs, "r25-api", now);
+  return buildActionPeriod(startTs, endTs, maturityTs, "r25-api", now);
 }
 function resolveRedeemableActionPeriod(raw, walletShares, nav, lockDays, isAsync) {
   const totalPosition = walletShares + raw.pendingRedeemShares + raw.claimableRedeemShares;
@@ -38855,42 +38867,95 @@ function resolveR25TrancheActionPeriod(positions, totalShares, nav, lockDays, is
   };
 }
 
+// src/logic/epochs.ts
+function parseEpoch(e) {
+  const named = [
+    ["lockStart", e.lockStart],
+    ["lockEnd", e.lockEnd],
+    ["actionStart", e.actionStart],
+    ["actionEnd", e.actionEnd],
+    ["withdrawable", e.withdrawable],
+    ...e.deposit ? [["deposit.start", e.deposit.start], ["deposit.end", e.deposit.end]] : [],
+    ...e.terms.map((t) => ["terms.from", t.from])
+  ];
+  for (const [name, iso] of named) {
+    if (iso == null || isoToSec(iso) == null) return `unparseable ${name}: ${iso}`;
+  }
+  const s = (iso) => isoToSec(iso);
+  const secs = {
+    lockStart: s(e.lockStart),
+    lockEnd: s(e.lockEnd),
+    actionStart: s(e.actionStart),
+    actionEnd: s(e.actionEnd),
+    withdrawable: s(e.withdrawable),
+    depositStart: e.deposit ? s(e.deposit.start) : null,
+    depositEnd: e.deposit ? s(e.deposit.end) : null
+  };
+  if (secs.lockEnd <= secs.lockStart) return "lockEnd must be after lockStart";
+  if (secs.actionEnd <= secs.actionStart) return "actionEnd must be after actionStart";
+  if (secs.depositStart != null && secs.depositEnd <= secs.depositStart) return "deposit.end must be after deposit.start";
+  return secs;
+}
+function toView(e, secs, role, now) {
+  const terms = [...e.terms].sort((a, b2) => isoToSec(a.from) - isoToSec(b2.from));
+  let currentTerms = null;
+  for (const t of terms) if (isoToSec(t.from) <= now) currentTerms = t;
+  if (currentTerms == null) currentTerms = terms[0] ?? null;
+  const depositOpen = secs.depositStart != null && now >= secs.depositStart && now < secs.depositEnd;
+  const opensAt = secs.depositStart ?? secs.lockStart;
+  const status = now < opensAt ? "upcoming" : depositOpen ? "deposit-open" : "locked";
+  return {
+    id: e.id,
+    label: e.label,
+    role,
+    status,
+    deposit: e.deposit ? { start: e.deposit.start, end: e.deposit.end, isOpen: depositOpen } : null,
+    lockStart: e.lockStart,
+    lockEnd: e.lockEnd,
+    actionPeriod: buildActionPeriod(secs.actionStart, secs.actionEnd, secs.withdrawable, "config", now),
+    withdrawable: e.withdrawable,
+    currentTerms,
+    terms
+  };
+}
+function resolveEpochs(entry, now) {
+  const errors = [];
+  const live = [];
+  for (const e of entry.epochs ?? []) {
+    const parsed = parseEpoch(e);
+    if (typeof parsed === "string") {
+      errors.push({ scope: `epochs:${e.id}`, error: parsed });
+      continue;
+    }
+    if (now < parsed.withdrawable) live.push({ e, secs: parsed });
+  }
+  live.sort((a, b2) => a.secs.lockStart - b2.secs.lockStart);
+  return {
+    epochs: live.map(({ e, secs }, i) => toView(e, secs, i === 0 ? "current" : "next", now)),
+    errors
+  };
+}
+function currentEpoch(entry, now) {
+  return resolveEpochs(entry, now).epochs[0] ?? null;
+}
+function epochApy(entry, now) {
+  return currentEpoch(entry, now)?.currentTerms?.netApy ?? entry.apyFallback;
+}
+function resolveActionPeriod(entry, now) {
+  return currentEpoch(entry, now)?.actionPeriod ?? buildActionPeriod(null, null, null, "unavailable", now);
+}
+
 // src/logic/position.ts
 var SECONDS_PER_YEAR = 31557600;
 function lockTiming(entry, now) {
-  const lockStartSec = isoToSec(entry.actionPeriodConfig?.lockStart ?? "");
-  const lockEndSec = isoToSec(entry.actionPeriodConfig?.lockEnd ?? "");
+  const cur = currentEpoch(entry, now);
+  const lockStartSec = isoToSec(cur?.lockStart ?? "");
+  const lockEndSec = isoToSec(cur?.lockEnd ?? "");
   return {
     depositedDurationDays: lockStartSec != null && now >= lockStartSec ? dayDiff(lockStartSec, now) : null,
     lockYears: lockStartSec != null && lockEndSec != null ? (lockEndSec - lockStartSec) / SECONDS_PER_YEAR : null,
     remainingLockYears: lockEndSec != null ? Math.max(0, lockEndSec - now) / SECONDS_PER_YEAR : null
   };
-}
-function resolveDepositPeriod(entry, now) {
-  const cfg = entry.depositPeriodConfig;
-  if (!cfg) return null;
-  const preStart = isoToSec(cfg.preStart);
-  const preEnd = isoToSec(cfg.preEnd);
-  const extendEnd = isoToSec(cfg.extendEnd);
-  if (preStart == null || preEnd == null || extendEnd == null) return null;
-  const phase = now < preStart ? "upcoming" : now < preEnd ? "pre" : now < extendEnd ? "extend" : "closed";
-  return {
-    start: cfg.preStart,
-    end: cfg.extendEnd,
-    isOpen: phase === "pre" || phase === "extend",
-    phase,
-    segments: [
-      { phase: "pre", start: cfg.preStart, end: cfg.preEnd, ...cfg.pre },
-      { phase: "extend", start: cfg.preEnd, end: cfg.extendEnd, ...cfg.extend }
-    ]
-  };
-}
-function configApy(entry, now) {
-  const cfg = entry.depositPeriodConfig;
-  if (!cfg) return entry.apyFallback;
-  const preEnd = isoToSec(cfg.preEnd);
-  if (preEnd == null) return entry.apyFallback;
-  return now < preEnd ? cfg.pre.netApy : cfg.extend.netApy;
 }
 function computePosition(args) {
   const { entry, sharesHuman, nav, apy, actionPeriod, now, navResolvedFrom, r25Holding } = args;
@@ -38900,7 +38965,7 @@ function computePosition(args) {
   const realizedYield = hasRealEarnings ? r25Holding.earnings : currentValue != null ? currentValue - shares * entry.entryNavBaseline : null;
   const principal = hasRealEarnings ? currentValue - r25Holding.earnings : shares * entry.entryNavBaseline;
   const { depositedDurationDays, remainingLockYears } = lockTiming(entry, now);
-  const effectiveApy = apy ?? configApy(entry, now);
+  const effectiveApy = apy ?? epochApy(entry, now);
   const projectionBase = currentValue ?? principal;
   const expectedTotalYield = remainingLockYears != null ? (realizedYield ?? 0) + projectionBase * effectiveApy * remainingLockYears : null;
   const assumptions = {
@@ -38923,12 +38988,11 @@ function computePosition(args) {
     principal,
     realizedYield,
     depositedDurationDays,
-    lockEnd: entry.actionPeriodConfig?.lockEnd ?? null,
+    lockEnd: currentEpoch(entry, now)?.lockEnd ?? null,
     expectedTotalYield,
     actionPeriod
   };
-  const depositPeriod = resolveDepositPeriod(entry, now);
-  if (depositPeriod) position.depositPeriod = depositPeriod;
+  if (entry.epochs) position.epochs = resolveEpochs(entry, now).epochs;
   if (r25Holding) position.r25 = r25Holding;
   return position;
 }
@@ -38947,7 +39011,7 @@ function computePAlphaPosition(args) {
   const unrealized = usdE9(emberPosition.unrealizedYieldUsdE9);
   const principal = currentValue != null && totalYield != null ? currentValue - totalYield : null;
   const { depositedDurationDays, remainingLockYears } = lockTiming(entry, now);
-  const effectiveApy = apy ?? entry.apyFallback;
+  const effectiveApy = apy ?? epochApy(entry, now);
   const expectedTotalYield = totalYield != null && currentValue != null && remainingLockYears != null ? totalYield + currentValue * effectiveApy * remainingLockYears : null;
   const position = {
     vault: entry.id,
@@ -38967,10 +39031,11 @@ function computePAlphaPosition(args) {
     principal,
     realizedYield: totalYield,
     depositedDurationDays,
-    lockEnd: entry.actionPeriodConfig?.lockEnd ?? null,
+    lockEnd: currentEpoch(entry, now)?.lockEnd ?? null,
     expectedTotalYield,
     actionPeriod
   };
+  if (entry.epochs) position.epochs = resolveEpochs(entry, now).epochs;
   if (realized != null && unrealized != null && totalYield != null) {
     position.yieldBreakdown = { realized, unrealized, total: totalYield };
   }
@@ -39051,10 +39116,40 @@ function messageFor(vault, u, ap, tranches) {
       return `${vault}: action period unavailable.`;
   }
 }
+function pct(n2) {
+  return `${Number((n2 * 100).toFixed(2))}%`;
+}
+function fmtUtc8(iso) {
+  const s = new Date(Date.parse(iso)).toLocaleString("en-US", {
+    timeZone: "Asia/Shanghai",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  });
+  return `${s} UTC+8`;
+}
+function epochReminders(p, epochs) {
+  if (epochs.length === 0) {
+    return [{ vault: p.vault, urgency: "unknown", message: `${p.vault}: no active epoch configured; config may be stale.`, actionPeriod: p.actionPeriod }];
+  }
+  return epochs.map((e) => {
+    const ap = e.role === "current" ? p.actionPeriod : e.actionPeriod;
+    const urgency = classify(ap);
+    const who = `${p.vault} ${e.label}`;
+    let message = urgency === "closed" ? `${who}: withdraw window for this epoch has closed; holdings roll over into the next epoch after ${fmtUtc8(e.withdrawable)}.` : messageFor(who, urgency, ap, p.r25?.tranches);
+    if (e.deposit?.isOpen && e.currentTerms) {
+      message += ` Deposit open until ${fmtUtc8(e.deposit.end)} (${e.currentTerms.label} net APY ${pct(e.currentTerms.netApy)}).`;
+    }
+    return { vault: p.vault, epoch: e.id, urgency, message, actionPeriod: ap };
+  });
+}
 function buildReminders(positions) {
-  return positions.map((p) => {
+  return positions.flatMap((p) => {
+    if (p.epochs) return epochReminders(p, p.epochs);
     const urgency = classify(p.actionPeriod);
-    return { vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod, p.r25?.tranches), actionPeriod: p.actionPeriod };
+    return [{ vault: p.vault, urgency, message: messageFor(p.vault, urgency, p.actionPeriod, p.r25?.tranches), actionPeriod: p.actionPeriod }];
   });
 }
 
@@ -39242,9 +39337,9 @@ async function navFor(entry, provider, deps, now) {
   const { vault, shareDecimals, assetDecimals } = entry.onchainNav;
   try {
     const nav = await deps.getVaultNavOnchain(vault, shareDecimals, assetDecimals, provider);
-    return { nav, apy: configApy(entry, now), navResolvedFrom: "onchain" };
+    return { nav, apy: epochApy(entry, now), navResolvedFrom: "onchain" };
   } catch {
-    return { nav: null, apy: configApy(entry, now), navResolvedFrom: "none" };
+    return { nav: null, apy: epochApy(entry, now), navResolvedFrom: "none" };
   }
 }
 function toR25HoldingInfo(h, positionsData, nowMs) {
@@ -39347,7 +39442,7 @@ async function fetchR25Data(address, registry, deps, errors) {
     note("portfolio/holdings", e);
   }
   for (const entry of registry) {
-    if (!entry.r25VaultId || !entry.actionPeriodConfig) continue;
+    if (!entry.r25VaultId || !entry.epochs) continue;
     try {
       const period = await deps.fetchR25VaultPeriod(entry.r25VaultId);
       if (period) periods.set(entry.r25VaultId, period);
@@ -39404,6 +39499,7 @@ async function buildPositions(address, opts, errors, depsOverride) {
   });
   await Promise.allSettled(registry.map(async (entry) => {
     try {
+      for (const err of resolveEpochs(entry, now).errors) errors.push(err);
       const rpcOverrides = opts.rpc ? { [DEFAULT_CHAIN_ID]: opts.rpc } : {};
       const shares = await deps.getVaultShares(entry.balanceSources, address, rpcOverrides);
       for (const be of shares.errors) {
@@ -39436,7 +39532,7 @@ async function buildPositions(address, opts, errors, depsOverride) {
       let navResolvedFrom;
       if (r25h) {
         nav = Number(r25h.nav) || null;
-        const baseApy = Number(r25h.apy) || configApy(entry, now);
+        const baseApy = Number(r25h.apy) || epochApy(entry, now);
         const boostApy = r25h.boostInfo ? Number(r25h.boostInfo.boostApy) || 0 : 0;
         apy = baseApy + boostApy;
         navResolvedFrom = "r25-api";

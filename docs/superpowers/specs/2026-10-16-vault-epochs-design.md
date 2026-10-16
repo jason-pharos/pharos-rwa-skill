@@ -127,6 +127,7 @@ interface EpochView {
   - 存入期开放时，消息末尾追加 `Deposit open until <date> (<label> net APY x%).`。
 - **没有有效期时**：输出一条 `unknown` 提醒：`<vault>: no active epoch configured; config may be stale.`
 - **日期来源**：`current` 期的提醒沿用顶层 `actionPeriod`（APC3M 优先用 R25，和现有行为一致）；`next` 期的提醒用该期的配置日期。
+- **上一期的赎回窗口已过**：紧急程度仍为 `closed`，但消息改为 `<vault> <label>: withdraw window for this epoch has closed; holdings roll over into the next epoch after <withdrawable>.`，不再沿用"config may be stale"的提示。
 - **VRPC**：不变。
 
 ## 远程配置
